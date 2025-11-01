@@ -1,0 +1,19 @@
+# Core dependencies
+streamlit
+openai
+
+# For baseline model
+transformers
+torch
+accelerate
+bitsandbytes
+
+# Evaluation
+pandas
+numpy
+scikit-learn
+datasets
+
+# Utilities
+python-dotenv
+tqdm
