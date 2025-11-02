@@ -18,6 +18,8 @@ This project builds an educational AI tutor that:
 - Python 3.8+ (tested with Python 3.13)
 - Git
 - Virtual environment (recommended)
+- ~10GB free disk space (for model downloads)
+- Internet connection for initial setup
 
 ### 1. Clone and Setup Environment
 
