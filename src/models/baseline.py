@@ -34,28 +34,29 @@ class BaselineModel:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
-        print(f"Model loaded on {self.model.device}")
+        device = next(self.model.parameters()).device
+        print(f"Model loaded on {device}")
 
     def _get_system_prompt(self, subject: str) -> str:
         """Generate system prompt for Singapore O-Level tutoring."""
         return f"""You are an educational AI tutor for Singapore O-Level students (ages 13-16).
-You specialise in {subject} following the MOE curriculum.
+        You specialise in {subject} following the MOE curriculum.
 
-**GUIDELINES:**
-1. Provide step-by-step explanations WITHOUT giving direct answers
-2. Use Singapore curriculum terminology and notation
-3. Highlight key concepts that appear in MOE marking schemes
-4. Maintain an encouraging, age-appropriate tone
-5. Refuse off-topic or inappropriate requests politely
+        **GUIDELINES:**
+        1. Provide step-by-step explanations WITHOUT giving direct answers
+        2. Use Singapore curriculum terminology and notation
+        3. Highlight key concepts that appear in MOE marking schemes
+        4. Maintain an encouraging, age-appropriate tone
+        5. Refuse off-topic or inappropriate requests politely
 
-**EXAMPLE APPROACH:**
-Student: "How do I solve x² + 5x + 6 = 0?"
-You: "Great question! Let's use factorization. First, we need two numbers that:
-- Multiply to give 6 (the constant term)
-- Add to give 5 (the coefficient of x)
+        **EXAMPLE APPROACH:**
+        Student: "How do I solve x² + 5x + 6 = 0?"
+        You: "Great question! Let's use factorization. First, we need two numbers that:
+        - Multiply to give 6 (the constant term)
+        - Add to give 5 (the coefficient of x)
 
-Can you think of two numbers that fit these conditions?"
-"""
+        Can you think of two numbers that fit these conditions?"
+        """
 
     def generate(
         self,
@@ -84,12 +85,13 @@ Can you think of two numbers that fit these conditions?"
             full_prompt = f"{system_prompt}\n\nStudent: {prompt}\n\nTutor:"
             
             # Tokenize
+            device = next(self.model.parameters()).device
             inputs = self.tokenizer(
                 full_prompt, 
                 return_tensors="pt", 
                 truncation=True, 
                 max_length=2048
-            ).to(self.model.device)
+            ).to(device)
             
             # Generate
             with torch.no_grad():
@@ -103,8 +105,27 @@ Can you think of two numbers that fit these conditions?"
                 )
             
             # Decode only the new tokens
+            # outputs is a tensor with shape [batch_size, sequence_length]
+            if outputs.numel() == 0:
+                raise ValueError("Model generation returned empty output")
+            
+            # Ensure outputs has the expected shape [batch_size, sequence_length]
+            if len(outputs.shape) < 2:
+                raise ValueError(f"Unexpected output shape: {outputs.shape}. Expected [batch_size, sequence_length]")
+            
+            if outputs.shape[0] == 0:
+                raise ValueError("Output batch size is 0")
+            
+            input_length = inputs['input_ids'].shape[1]
+            output_length = outputs.shape[1]  # sequence_length dimension
+            
+            if output_length < input_length:
+                raise ValueError(f"Output length ({output_length}) is less than input length ({input_length})")
+            
+            # Get the first batch item and extract only the newly generated tokens
+            generated_tokens = outputs[0][input_length:]
             response_text = self.tokenizer.decode(
-                outputs[0][inputs['input_ids'].shape[1]:], 
+                generated_tokens, 
                 skip_special_tokens=True
             )
             
@@ -112,9 +133,9 @@ Can you think of two numbers that fit these conditions?"
                 "response": response_text.strip(),
                 "metadata": {
                     "model_name": self.model_name,
-                    "prompt_tokens": inputs['input_ids'].shape[1],
-                    "generated_tokens": outputs.shape[1] - inputs['input_ids'].shape[1],
-                    "total_tokens": outputs.shape[1]
+                    "prompt_tokens": input_length,
+                    "generated_tokens": output_length - input_length,
+                    "total_tokens": output_length
                 }
             }
             

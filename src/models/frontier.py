@@ -79,10 +79,16 @@ class FrontierModel:
             )
             
             # Extract response text
+            if not response.choices or len(response.choices) == 0:
+                raise ValueError("API response contains no choices")
+            
             response_text = response.choices[0].message.content
+            if response_text is None:
+                raise ValueError("API response message content is None")
             
             # Calculate confidence from logprobs
-            confidence = self._calculate_confidence(response.choices[0].logprobs) if use_logprobs else None
+            logprobs = response.choices[0].logprobs if use_logprobs else None
+            confidence = self._calculate_confidence(logprobs) if logprobs else None
             
             return {
                 "response": response_text,
@@ -141,16 +147,17 @@ class FrontierModel:
             
             # Calculate uncertainty if alternatives are available
             if token_data.top_logprobs and len(token_data.top_logprobs) > 0:
-                # Get second-best alternative probability
-                second_best_prob = math.exp(token_data.top_logprobs[0].logprob)
+                # Get the best alternative probability (second-best overall)
+                # top_logprobs[0] is the best alternative to the chosen token
+                best_alternative_prob = math.exp(token_data.top_logprobs[0].logprob)
                 
-                # Uncertainty = how close is the alternative?
-                # 1.0 = equally likely, 0.0 = alternative very unlikely
-                uncertainty_ratio = second_best_prob / chosen_prob if chosen_prob > 0 else 0
+                # Uncertainty = how close is the best alternative to the chosen token?
+                # 1.0 = equally likely (high uncertainty), 0.0 = alternative very unlikely (low uncertainty)
+                uncertainty_ratio = best_alternative_prob / chosen_prob if chosen_prob > 0 else 0
                 uncertainties.append(uncertainty_ratio)
                 
-                # Flag if uncertainty is high (alternatives are close)
-                if uncertainty_ratio > 0.5:  # Second best has >50% of top probability
+                # Flag if uncertainty is high (best alternative is close to chosen token)
+                if uncertainty_ratio > 0.5:  # Best alternative has >50% of chosen token's probability
                     high_uncertainty_count += 1
                 
                 # Calculate entropy across all top alternatives
@@ -200,8 +207,10 @@ class FrontierModel:
             )
             
             for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta_content = chunk.choices[0].delta.content
+                    if delta_content:
+                        yield delta_content
                     
         except Exception as e:
             yield f"Error: {e}"
