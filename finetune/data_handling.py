@@ -19,7 +19,7 @@ OUT_DATA_FILES: dict[str, str] = {
 }
 
 
-def convert_to_openai_format(filepath: str) -> None:
+def convert_to_question_answer_format(filepath: str) -> None:
     assert filepath in OUT_DATA_FILES.keys(), f"Unexpected file: {filepath}"
     out_csv_path = OUT_DATA_FILES[filepath]
 
@@ -60,7 +60,7 @@ def main() -> None:
 
     # print(bio_dataset[0])
     for base_csv in BASE_DATA_FILES:
-        convert_to_openai_format(base_csv)
+        convert_to_question_answer_format(base_csv)
 
     bio_dataset = convert_csv_to_dataset("data/bio.csv")
     print(bio_dataset[0])
