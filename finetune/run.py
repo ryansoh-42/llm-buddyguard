@@ -5,38 +5,12 @@ import torch
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
-from .data_handling import convert_csv_to_dataset
+from data_handling import convert_csv_to_dataset
 
 
 MODEL_ID: str = "meta-llama/Llama-3.2-1B-Instruct"
 SUBJECTS: list[str] = ["bio", "chem", "physics"]
-
-
-# Utility functions
-def apply_chat_template(example: dict[str, str], tokenizer: AutoTokenizer) -> dict[dict[str, str]]:
-    messages: list[dict[str, str]] = [
-        {"role": "user", "content": example["user"]},
-        {"role": "assistant", "content": example["final"]}
-    ]
-
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-
-    return {
-        "prompt": prompt
-    }
-
-
-def tokenize_func(example: dict[str, str], tokenizer: AutoTokenizer):
-    tokens = tokenizer(example["prompt"], padding="max_length", truncation=True, max_length=128)
-    tokens["labels"] = [
-        -100 if token == tokenizer.pad_token_id else token for token in tokens["input_ids"]
-    ]
-
-    return tokens
+TOKEN: str = "REDACTED"
 
 
 def finetune(
@@ -53,11 +27,38 @@ def finetune(
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch.float32,
-        device_map="auto"
+        device_map="auto",
+        token=TOKEN
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, token=TOKEN)
     tokenizer.pad_token = tokenizer.eos_token
+
+    # Utility functions
+    def apply_chat_template(example: dict[str, str]) -> dict[dict[str, str]]:
+        messages: list[dict[str, str]] = [
+            {"role": "user", "content": example["user"]},
+            {"role": "assistant", "content": example["final"]}
+        ]
+
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+
+        return {
+            "prompt": prompt
+        }
+
+
+    def tokenize_func(example: dict[str, str]):
+        tokens = tokenizer(example["prompt"], padding="max_length", truncation=True, max_length=128)
+        tokens["labels"] = [
+            -100 if token == tokenizer.pad_token_id else token for token in tokens["input_ids"]
+        ]
+
+        return tokens
 
     formatted_dataset = dataset.map(apply_chat_template)
     formatted_dataset = formatted_dataset.train_test_split(0.05)
