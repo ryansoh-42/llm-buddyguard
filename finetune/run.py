@@ -1,16 +1,39 @@
+import os
+
 from pathlib import Path
 from typing import Literal
 
 import torch
 
+from dotenv import find_dotenv, load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 from data_handling import convert_csv_to_dataset
 
 
+load_dotenv(find_dotenv())
+
 MODEL_ID: str = "meta-llama/Llama-3.2-1B-Instruct"
 SUBJECTS: list[str] = ["bio", "chem", "physics"]
-TOKEN: str = "REDACTED"
+
+HF_TOKEN = os.getenv("HF_TOKEN")
+assert HF_TOKEN is not None, "Set HF_TOKEN environment variable!"
+
+
+def create_directories() -> None:
+    paths: list[str] = [
+        "metrics/bio",
+        "metrics/chem",
+        "metrics/physics",
+        "models/bio",
+        "models/chem",
+        "models/physics",
+        "results"
+    ]
+
+    for p in paths:
+        p_obj = Path(p)
+        p_obj.mkdir(parents=True, exist_ok=True)
 
 
 def finetune(
@@ -26,12 +49,12 @@ def finetune(
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
         device_map="auto",
-        token=TOKEN
+        token=HF_TOKEN
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id, token=TOKEN)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, token=HF_TOKEN)
     tokenizer.pad_token = tokenizer.eos_token
 
     # Utility functions
@@ -106,6 +129,10 @@ def finetune(
 
 
 def main() -> None:
+    # Create directories
+    create_directories()
+
+    # Run finetuning
     for subject in SUBJECTS:
         finetune(
             MODEL_ID,
