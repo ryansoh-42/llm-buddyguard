@@ -101,6 +101,7 @@ def finetune(
         eval_strategy="steps",
         eval_steps=40,
         logging_steps=40,
+        logging_dir="./metrics"
         save_strategy="no",
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
@@ -120,12 +121,19 @@ def finetune(
         tokenizer=tokenizer
     )
 
-    trainer.train()
+    train_result = trainer.train()
 
     trainer.save_model(f"models/{subject}")
-    trainer.save_metrics(f"metrics/{subject}")
-
     tokenizer.save_pretrained(f"models/{subject}")
+
+    train_metrics = train_result.metrics
+    trainer.log_metrics("train", train_metrics)
+    trainer.save_metrics("train", train_metrics)
+
+    # Evaluate the model
+    eval_metrics = trainer.evaluate()
+    trainer.log_metrics("eval", eval_metrics)
+    trainer.save_metrics("eval", eval_metrics)
 
     # model.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
     # tokenizer.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
