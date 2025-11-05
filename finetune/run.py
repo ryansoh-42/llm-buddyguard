@@ -101,7 +101,7 @@ def finetune(
         eval_strategy="steps",
         eval_steps=40,
         logging_steps=40,
-        logging_dir="./metrics"
+        logging_dir="./metrics",
         save_strategy="no",
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
