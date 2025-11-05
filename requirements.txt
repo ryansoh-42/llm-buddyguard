@@ -13,6 +13,7 @@ pandas
 numpy
 scikit-learn
 datasets
+rouge-score
 
 # Utilities
 python-dotenv
