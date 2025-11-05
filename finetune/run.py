@@ -127,6 +127,9 @@ def finetune(
 
     tokenizer.save_pretrained(f"models/{subject}")
 
+    model.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
+    tokenizer.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
+
 
 def main() -> None:
     # Create directories
