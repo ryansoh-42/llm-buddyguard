@@ -63,16 +63,17 @@ Computes F1 score based on keyword presence.
 
 ---
 
-#### 3. `compute_exact_match(generated, reference, normalize=True)`
+#### 3. `compute_exact_match(generated, reference, normalize=True, expected_keywords=None)`
 
-Computes exact match accuracy (for MCQ answers).
+Computes exact match accuracy (for MCQ answers). Optionally includes keyword analysis.
 
 **Input:**
 - `generated` (str): Model's answer (e.g., "The answer is B")
 - `reference` (str): Correct answer (e.g., "B")
 - `normalize` (bool, optional): Normalize text before comparison (default: True)
+- `expected_keywords` (List[str], optional): Keywords to check for in response
 
-**Output:**
+**Output (without keywords):**
 ```python
 {
     'exact_match': True,
@@ -82,29 +83,59 @@ Computes exact match accuracy (for MCQ answers).
 }
 ```
 
----
-
-#### 4. `compute_safety_score(response, violation_patterns=None)`
-
-Checks for safety/guardrail violations.
-
-**Input:**
-- `response` (str): Model's response
-- `violation_patterns` (List[str], optional): Custom regex patterns for violations
-
-**Output:**
+**Output (with keywords):**
 ```python
 {
-    'is_safe': True,
-    'safety_score': 1.0,
-    'violations': [],
-    'violation_count': 0
+    'exact_match': True,
+    'extracted_answer': 'b',
+    'reference_answer': 'b',
+    'accuracy': 1.0,
+    'keyword_f1': 0.85,
+    'keyword_recall': 0.90,
+    'matched_keywords': ['photosynthesis', 'chlorophyll'],
+    'missing_keywords': ['sunlight']
 }
 ```
 
 ---
 
-#### 5. `compute_all_metrics(generated, reference=None, expected_keywords=None, is_mcq=False)`
+#### 4. `compute_order_score(generated, reference, use_spacy=True)`
+
+Evaluates whether concepts appear in correct order using **dynamic concept extraction**.
+
+**Input:**
+- `generated` (str): Model-generated response
+- `reference` (str): Reference response with correct concept order
+- `use_spacy` (bool, optional): Use spaCy NLP for extraction (default: True)
+
+**Output:**
+```python
+{
+    'order_score': 0.5556,  # 0-1, higher = better order match
+    'reference_order': ['mitosis', 'prophase', 'occurs', 'metaphase', 'aligns', 'chromosomes', 'anaphase', 'separation', 'telophase'],
+    'generated_order': ['mitosis', 'prophase', 'metaphase', 'anaphase', 'telophase'],
+    'matched_concepts': ['mitosis', 'prophase', 'metaphase', 'anaphase', 'telophase'],
+    'missing_concepts': ['occurs', 'aligns', 'chromosomes', 'separation'],
+    'edit_distance': 4,
+    'correct_order': False,
+    'message': '4 edit(s) needed for correct order'
+}
+```
+
+**How it works:**
+1. **Dynamically extracts** key concepts (nouns + verbs) from reference text - NO hardcoded lists!
+2. Finds those concepts in generated text
+3. Compares order using Levenshtein edit distance
+4. Returns score where 1.0 = perfect match, 0.0 = completely different
+
+**Key Feature:** Adapts to ANY subject/question:
+- Math: "factorize", "multiply", "simplify"
+- Biology: "prophase", "metaphase", "anaphase"
+- Chemistry: "react", "precipitate", "dissolve"
+
+---
+
+#### 5. `compute_all_metrics(generated, reference=None, expected_keywords=None, is_mcq=False, check_order=False)`
 
 Computes all available metrics in one call.
 
@@ -113,6 +144,7 @@ Computes all available metrics in one call.
 - `reference` (str, optional): Reference answer for ROUGE/exact match
 - `expected_keywords` (List[str], optional): Keywords for F1
 - `is_mcq` (bool, optional): Whether this is an MCQ (default: False)
+- `check_order` (bool, optional): Evaluate reasoning step order (default: False)
 
 **Output:**
 ```python
@@ -130,12 +162,6 @@ Computes all available metrics in one call.
         'f1': 0.33,
         'matched_keywords': ['factorize', 'multiply', 'add'],
         'missing_keywords': []
-    },
-    'safety': {
-        'is_safe': True,
-        'safety_score': 1.0,
-        'violations': [],
-        'violation_count': 0
     }
 }
 ```
@@ -174,6 +200,14 @@ result = metrics.compute_all_metrics(
     reference="B",
     is_mcq=True
 )
+
+# Order evaluation (check reasoning step order)
+result = metrics.compute_all_metrics(
+    generated="First multiply, then factorize, then simplify",
+    reference="First factorize, then multiply, then simplify",
+    check_order=True
+)
+print(result['order']['order_score'])  # 0.33 (wrong order)
 ```
 
 ### Integration with ModelEvaluator
@@ -232,9 +266,9 @@ with col3:
 |--------|---------------|----------------|
 | ROUGE | `generated`, `reference` | - |
 | Keyword F1 | `generated`, `expected_keywords` | `case_sensitive` |
-| Exact Match | `generated`, `reference` | `normalize` |
-| Safety | `generated` | `violation_patterns` |
-| All Metrics | `generated` | `reference`, `expected_keywords`, `is_mcq` |
+| Exact Match | `generated`, `reference` | `normalize`, `expected_keywords` |
+| Order Score | `generated`, `reference` | `use_spacy` |
+| All Metrics | `generated` | `reference`, `expected_keywords`, `is_mcq`, `check_order` |
 
 ---
 

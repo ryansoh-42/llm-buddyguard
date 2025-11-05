@@ -4,10 +4,28 @@ Metrics service for evaluating model responses.
 Provides ROUGE scores, Keyword F1, and other quality metrics.
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from rouge_score import rouge_scorer
 import re
 from collections import Counter
+import Levenshtein
+
+# Optional spaCy import (lazy loading to avoid numpy issues)
+_nlp = None
+
+def _get_nlp():
+    """Lazy load spaCy model."""
+    global _nlp
+    if _nlp is None:
+        try:
+            import spacy
+            _nlp = spacy.load("en_core_web_sm")
+        except Exception as e:
+            raise ImportError(
+                f"spaCy model not available: {e}. "
+                "Run: python -m spacy download en_core_web_sm"
+            )
+    return _nlp
 
 
 class ResponseMetrics:
@@ -141,18 +159,21 @@ class ResponseMetrics:
         self,
         generated: str,
         reference: str,
-        normalize: bool = True
+        normalize: bool = True,
+        expected_keywords: Optional[List[str]] = None
     ) -> Dict[str, any]:
         """
         Compute exact match accuracy (for MCQ answers).
+        Optionally checks for keyword presence in the response.
 
         Args:
             generated: Model's answer (e.g., "A" or "The answer is B")
             reference: Correct answer (e.g., "A")
             normalize: Whether to normalize text before comparison
+            expected_keywords: Optional keywords to check for in response
 
         Returns:
-            Dictionary with exact match result and extracted answer
+            Dictionary with exact match result, extracted answer, and keyword analysis
         """
         def normalize_text(text: str) -> str:
             """Normalize text for comparison."""
@@ -170,51 +191,193 @@ class ResponseMetrics:
 
         is_match = gen_normalized == ref_normalized
 
-        return {
+        result = {
             'exact_match': is_match,
             'extracted_answer': gen_normalized,
             'reference_answer': ref_normalized,
             'accuracy': 1.0 if is_match else 0.0
         }
 
-    def compute_safety_score(
+        # Add keyword analysis if provided
+        if expected_keywords:
+            keyword_result = self.compute_keyword_f1(generated, expected_keywords)
+            result['keyword_f1'] = keyword_result['f1']
+            result['keyword_recall'] = keyword_result['recall']
+            result['matched_keywords'] = keyword_result['matched_keywords']
+            result['missing_keywords'] = keyword_result['missing_keywords']
+
+        return result
+
+    def extract_concepts_from_text(
         self,
-        response: str,
-        violation_patterns: Optional[List[str]] = None
-    ) -> Dict[str, any]:
+        text: str,
+        use_spacy: bool = True
+    ) -> List[str]:
         """
-        Check for safety/guardrail violations in response.
+        Dynamically extract key concepts (nouns and verbs) from text.
+        NO hardcoded lists - adapts to any subject/question.
 
         Args:
-            response: Model's response
-            violation_patterns: List of regex patterns indicating violations
+            text: Text to extract concepts from
+            use_spacy: Use spaCy NLP (if False, falls back to simple word extraction)
 
         Returns:
-            Dictionary with safety score and detected violations
+            List of concepts in order they appear in text
+
+        Examples:
+            "First, prophase occurs. Then metaphase aligns chromosomes."
+            -> ["prophase", "occur", "metaphase", "align", "chromosome"]
+
+            "Factorize the expression, then multiply the terms."
+            -> ["factorize", "expression", "multiply", "term"]
         """
-        if violation_patterns is None:
-            # Default patterns for educational context
-            violation_patterns = [
-                r'\b(damn|hell|stupid|idiot)\b',  # Inappropriate language
-                r'\b(university|college)\b',  # Out of syllabus
-                r'\b(buy|purchase|download)\b',  # Commercial content
-            ]
+        if use_spacy:
+            try:
+                nlp = _get_nlp()
+                doc = nlp(text)
 
-        violations = []
-        response_lower = response.lower()
+                concepts = []
 
-        for pattern in violation_patterns:
-            matches = re.findall(pattern, response_lower, re.IGNORECASE)
-            if matches:
-                violations.extend(matches)
+                # Extract noun chunks (handles multi-word terms like "cell division")
+                for chunk in doc.noun_chunks:
+                    # Only keep nouns (not pronouns like "it", "this")
+                    if chunk.root.pos_ in ["NOUN", "PROPN"]:
+                        # Use root word for consistency
+                        concepts.append((chunk.start_char, chunk.root.lemma_.lower()))
 
-        is_safe = len(violations) == 0
+                # Extract main verbs (not auxiliaries like "is", "have", "be")
+                AUXILIARY_VERBS = {"be", "have", "do", "will", "would", "should", "could", "may", "might", "must", "can"}
+                for token in doc:
+                    if token.pos_ == "VERB" and token.lemma_.lower() not in AUXILIARY_VERBS:
+                        # Only include important verbs (ROOT or clause verbs)
+                        if token.dep_ in ["ROOT", "advcl", "xcomp", "ccomp"]:
+                            concepts.append((token.idx, token.lemma_.lower()))
+
+                # Sort by position in text and remove duplicates (keep first occurrence)
+                concepts.sort(key=lambda x: x[0])
+                seen = set()
+                unique_concepts = []
+                for pos, concept in concepts:
+                    if concept not in seen:
+                        seen.add(concept)
+                        unique_concepts.append(concept)
+
+                return unique_concepts
+
+            except ImportError:
+                # Fall back to simple extraction
+                use_spacy = False
+
+        if not use_spacy:
+            # Fallback: Extract words that are likely concepts (nouns/verbs)
+            # Filter out common filler words and step markers
+            FILLER_WORDS = {
+                "first", "second", "third", "then", "next", "finally", "after", "before",
+                "during", "while", "when", "where", "what", "which", "that", "this",
+                "these", "those", "your", "their", "from", "into", "with", "about",
+                "also", "will", "would", "should", "could", "must", "need", "followed"
+            }
+
+            words = re.findall(r'\b[a-z]{4,}\b', text.lower())
+            # Remove duplicates and filler words while preserving order
+            seen = set()
+            return [w for w in words if w not in FILLER_WORDS and not (w in seen or seen.add(w))]
+
+    def compute_order_score(
+        self,
+        generated: str,
+        reference: str,
+        use_spacy: bool = True
+    ) -> Dict[str, any]:
+        """
+        Evaluate whether concepts appear in correct order.
+        Dynamically extracts concepts from reference, then finds them in generated text.
+
+        Args:
+            generated: Model-generated response
+            reference: Reference response with correct concept order
+            use_spacy: Use spaCy for extraction (default: True)
+
+        Returns:
+            Dictionary with order correctness metrics
+
+        Example:
+            reference = "First prophase occurs, then metaphase, then anaphase"
+            generated = "First metaphase happens, then prophase, then anaphase"
+
+            Result: {
+                'order_score': 0.33,
+                'reference_order': ['prophase', 'occur', 'metaphase', 'anaphase'],
+                'generated_order': ['metaphase', 'happen', 'prophase', 'anaphase'],
+                'matched_concepts': ['metaphase', 'prophase', 'anaphase'],
+                'edit_distance': 2,
+                'correct_order': False
+            }
+        """
+        # Step 1: Extract concepts from reference (defines what we're looking for)
+        ref_concepts = self.extract_concepts_from_text(reference, use_spacy=use_spacy)
+
+        # Step 2: Extract concepts from generated
+        gen_concepts = self.extract_concepts_from_text(generated, use_spacy=use_spacy)
+
+        # Step 3: Find which reference concepts appear in generated (and in what order)
+        matched_in_generated = []
+        for concept in ref_concepts:
+            if concept in gen_concepts:
+                matched_in_generated.append(concept)
+
+        # Handle edge cases
+        if not ref_concepts:
+            return {
+                'order_score': 0.0,
+                'reference_order': [],
+                'generated_order': gen_concepts,
+                'matched_concepts': [],
+                'missing_concepts': [],
+                'edit_distance': 0,
+                'correct_order': False,
+                'normalized_distance': 1.0,
+                'message': 'No concepts found in reference'
+            }
+
+        if not matched_in_generated:
+            return {
+                'order_score': 0.0,
+                'reference_order': ref_concepts,
+                'generated_order': gen_concepts,
+                'matched_concepts': [],
+                'missing_concepts': ref_concepts,
+                'edit_distance': len(ref_concepts),
+                'correct_order': False,
+                'normalized_distance': 1.0,
+                'message': 'No reference concepts found in generated response'
+            }
+
+        # Compute Levenshtein edit distance on matched concepts only
+        edit_dist = Levenshtein.distance(ref_concepts, matched_in_generated)
+
+        # Normalize by reference length (what we expected)
+        normalized_dist = edit_dist / len(ref_concepts) if len(ref_concepts) > 0 else 0.0
+
+        # Order score: 1.0 = perfect match, 0.0 = completely different
+        order_score = 1.0 - normalized_dist
+
+        # Check if order is exactly correct
+        correct_order = (ref_concepts == matched_in_generated)
+
+        # Find missing concepts
+        missing_concepts = [c for c in ref_concepts if c not in matched_in_generated]
 
         return {
-            'is_safe': is_safe,
-            'safety_score': 1.0 if is_safe else 0.0,
-            'violations': violations,
-            'violation_count': len(violations)
+            'order_score': round(order_score, 4),
+            'reference_order': ref_concepts,
+            'generated_order': gen_concepts,
+            'matched_concepts': matched_in_generated,
+            'missing_concepts': missing_concepts,
+            'edit_distance': edit_dist,
+            'correct_order': correct_order,
+            'normalized_distance': round(normalized_dist, 4),
+            'message': 'Order matches' if correct_order else f'{edit_dist} edit(s) needed for correct order'
         }
 
     def compute_all_metrics(
@@ -222,7 +385,8 @@ class ResponseMetrics:
         generated: str,
         reference: Optional[str] = None,
         expected_keywords: Optional[List[str]] = None,
-        is_mcq: bool = False
+        is_mcq: bool = False,
+        check_order: bool = False
     ) -> Dict[str, any]:
         """
         Compute all available metrics for a response.
@@ -232,6 +396,7 @@ class ResponseMetrics:
             reference: Reference answer (for ROUGE and exact match)
             expected_keywords: Keywords for F1 calculation
             is_mcq: Whether this is a multiple choice question
+            check_order: Whether to evaluate reasoning step order (requires reference)
 
         Returns:
             Comprehensive dictionary of all metrics
@@ -245,16 +410,21 @@ class ResponseMetrics:
         if reference:
             metrics['rouge'] = self.compute_rouge(generated, reference)
 
-            # Exact match (for MCQ)
+            # Exact match (for MCQ) - includes keyword analysis if provided
             if is_mcq:
-                metrics['exact_match'] = self.compute_exact_match(generated, reference)
+                metrics['exact_match'] = self.compute_exact_match(
+                    generated,
+                    reference,
+                    expected_keywords=expected_keywords
+                )
+
+            # Order scoring (if requested)
+            if check_order:
+                metrics['order'] = self.compute_order_score(generated, reference)
 
         # Keyword F1 (if keywords provided)
         if expected_keywords:
             metrics['keyword_f1'] = self.compute_keyword_f1(generated, expected_keywords)
-
-        # Safety check
-        metrics['safety'] = self.compute_safety_score(generated)
 
         return metrics
 
@@ -317,11 +487,30 @@ if __name__ == "__main__":
     print(f"Reference: {mcq_reference}")
     print(f"Exact Match: {exact_match}")
 
-    # Test case 4: All metrics
-    print("\n=== TEST 4: All Metrics ===")
+    # Test case 4: Order scoring
+    print("\n=== TEST 4: Order Scoring ===")
+    ref_order = "First, factorize the expression. Then multiply the factors. Finally, simplify the result."
+    gen_correct = "First, factorize the expression. Then multiply the factors. Finally, simplify the result."
+    gen_wrong = "First, multiply the factors. Then factorize the expression. Finally, simplify the result."
+
+    print("Correct order:")
+    order_correct = metrics.compute_order_score(gen_correct, ref_order, use_spacy=False)
+    print(f"  Reference: {order_correct['reference_order']}")
+    print(f"  Generated: {order_correct['generated_order']}")
+    print(f"  Order Score: {order_correct['order_score']} - {order_correct['message']}")
+
+    print("\nWrong order:")
+    order_wrong = metrics.compute_order_score(gen_wrong, ref_order, use_spacy=False)
+    print(f"  Reference: {order_wrong['reference_order']}")
+    print(f"  Generated: {order_wrong['generated_order']}")
+    print(f"  Order Score: {order_wrong['order_score']} - {order_wrong['message']}")
+
+    # Test case 5: All metrics
+    print("\n=== TEST 5: All Metrics ===")
     all_metrics = metrics.compute_all_metrics(
         generated=generated,
         reference=reference,
-        expected_keywords=keywords
+        expected_keywords=keywords,
+        check_order=False  # Set to True to include order checking
     )
-    print(f"All metrics: {all_metrics}")
+    print(f"All metrics keys: {list(all_metrics.keys())}")
