@@ -6,8 +6,9 @@ A FastAPI service that evaluates model responses using multiple metrics in one J
 
 - ✅ **ROUGE Scores** - Text similarity metrics
 - ✅ **Text F1** - Word overlap evaluation (automatic, no keyword list needed)
+- ✅ **Keyword Recall** - Concept coverage using simple recall metric
 - ✅ **Exact Match** - MCQ answer grading
-- ✅ **Order Scoring** - Dynamic reasoning step validation
+- ✅ **Order Scoring** - Dynamic reasoning step validation (always applied)
 - ✅ **Batch Evaluation** - Process multiple responses at once
 
 ---
@@ -64,8 +65,8 @@ curl http://localhost:8000/metrics-info
 {
   "generated": "string (required)",
   "reference": "string (optional)",
-  "is_mcq": false (optional),
-  "check_order": false (optional)
+  "expected_keywords": ["keyword1", "keyword2"] (optional),
+  "is_mcq": false (optional)
 }
 ```
 
@@ -78,12 +79,15 @@ curl http://localhost:8000/metrics-info
     "word_count": 45,
     "rouge": {...},
     "text_f1": {...},
-    "exact_match": {...},
-    "order": {...}
+    "order": {...},
+    "keyword_recall": {...},
+    "exact_match": {...}
   },
   "message": null
 }
 ```
+
+**Note:** When reference is provided, `text_f1` and `order` are **always computed automatically**.
 
 ---
 
@@ -128,7 +132,40 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 2: Order Scoring (Biology)
+### Example 2: Keyword Coverage (Chemistry)
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "generated": "Chlorine is more reactive than bromine and can displace it from solution",
+    "expected_keywords": ["chlorine", "bromine", "reactive", "displace", "halogen"]
+  }'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "metrics": {
+    "response_length": 72,
+    "word_count": 12,
+    "keyword_recall": {
+      "recall": 0.80,
+      "matched_keywords": ["chlorine", "bromine", "reactive", "displace"],
+      "missing_keywords": ["halogen"],
+      "match_count": 4,
+      "expected_count": 5
+    }
+  },
+  "message": null
+}
+```
+
+---
+
+### Example 3: Order Scoring (Biology)
 
 **Request:**
 ```bash
@@ -136,8 +173,7 @@ curl -X POST http://localhost:8000/evaluate \
   -H "Content-Type: application/json" \
   -d '{
     "generated": "During mitosis, metaphase happens first, then prophase, then anaphase",
-    "reference": "During mitosis, prophase occurs first, then metaphase, then anaphase",
-    "check_order": true
+    "reference": "During mitosis, prophase occurs first, then metaphase, then anaphase"
   }'
 ```
 
@@ -167,7 +203,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 3: MCQ Evaluation
+### Example 4: MCQ Evaluation
 
 **Request:**
 ```bash
@@ -201,7 +237,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 4: Full Evaluation (with Order Scoring)
+### Example 5: Full Evaluation (All Metrics)
 
 **Request:**
 ```bash
@@ -210,7 +246,7 @@ curl -X POST http://localhost:8000/evaluate \
   -d '{
     "generated": "First multiply the terms, then factorize, then simplify",
     "reference": "First factorize, then multiply, then simplify",
-    "check_order": true
+    "expected_keywords": ["multiply", "factorize", "simplify"]
   }'
 ```
 
@@ -243,6 +279,13 @@ curl -X POST http://localhost:8000/evaluate \
       "edit_distance": 2,
       "correct_order": false,
       "message": "2 edit(s) needed for correct order"
+    },
+    "keyword_recall": {
+      "recall": 1.0,
+      "matched_keywords": ["multiply", "factorize", "simplify"],
+      "missing_keywords": [],
+      "match_count": 3,
+      "expected_count": 3
     }
   },
   "message": null
@@ -251,7 +294,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 5: Batch Evaluation
+### Example 6: Batch Evaluation
 
 **Request:**
 ```bash
@@ -279,11 +322,11 @@ import requests
 # API endpoint
 url = "http://localhost:8000/evaluate"
 
-# Request payload
+# Request payload (no need to escape long text!)
 payload = {
     "generated": "First multiply, then factorize, then simplify",
     "reference": "First factorize, then multiply, then simplify",
-    "check_order": True
+    "expected_keywords": ["multiply", "factorize", "simplify"]
 }
 
 # Make request
@@ -296,6 +339,7 @@ if response.status_code == 200:
 
     print(f"Order Score: {metrics['order']['order_score']}")
     print(f"Text F1: {metrics['text_f1']['f1']}")
+    print(f"Keyword Recall: {metrics['keyword_recall']['recall']}")
     print(f"ROUGE-L: {metrics['rouge']['rougeL']['fmeasure']}")
 else:
     print(f"Error: {response.status_code}")
@@ -352,9 +396,10 @@ FastAPI provides automatic interactive docs:
 | Metric | Requires | Optional |
 |--------|----------|----------|
 | **ROUGE** | `generated`, `reference` | - |
-| **Keyword F1** | `generated`, `expected_keywords` | - |
+| **Text F1** | `generated`, `reference` | - |
+| **Keyword Recall** | `generated`, `expected_keywords` | - |
 | **Exact Match** | `generated`, `reference`, `is_mcq=true` | - |
-| **Order Score** | `generated`, `reference`, `check_order=true` | `use_spacy` |
+| **Order Score** | `generated`, `reference` | `use_spacy` |
 | **Basic Stats** | `generated` | - |
 
 ---
@@ -362,11 +407,11 @@ FastAPI provides automatic interactive docs:
 ## Notes
 
 - The API automatically computes only applicable metrics based on provided inputs
-- If `reference` is not provided, ROUGE/order/exact_match will be skipped
-- If `expected_keywords` is not provided, keyword F1 will be skipped
+- If `reference` is provided, ROUGE, text F1, and order scoring are **always computed automatically**
+- If `expected_keywords` is provided, keyword recall will be computed
 - Basic stats (length, word count) are always computed
-- Set `check_order=true` to enable order scoring (requires `reference`)
 - Set `is_mcq=true` for MCQ evaluation (requires `reference`)
+- For long text, use Python client to avoid JSON escaping issues
 
 ---
 

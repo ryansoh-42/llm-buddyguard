@@ -2,7 +2,7 @@
 
 ## Overview
 
-`metrics.py` provides a standalone service for evaluating model response quality. It computes ROUGE scores, Text F1 (word overlap), exact match accuracy, and order scoring.
+`metrics.py` provides a standalone service for evaluating model response quality. It computes ROUGE scores, Text F1 (word overlap), Keyword Recall (concept coverage), exact match accuracy, and order scoring.
 
 ## Quick Start
 
@@ -70,7 +70,34 @@ Computes F1 score based on word overlap between generated and reference text. Au
 
 ---
 
-#### 3. `compute_exact_match(generated, reference, normalize=True)`
+#### 3. `compute_keyword_recall(generated, expected_keywords, case_sensitive=False)`
+
+Computes keyword coverage using simple recall metric. Measures what percentage of expected keywords appear in the response.
+
+**Input:**
+- `generated` (str): Model-generated response
+- `expected_keywords` (List[str]): Keywords that should appear
+- `case_sensitive` (bool, optional): Match case-sensitively (default: False)
+
+**Output:**
+```python
+{
+    'recall': 0.80,          # 4 out of 5 keywords found
+    'matched_keywords': ['chlorine', 'bromine', 'reactive', 'displace'],
+    'missing_keywords': ['halogen'],
+    'match_count': 4,
+    'expected_count': 5
+}
+```
+
+**Why recall instead of F1?**
+- **Recall** directly answers: "What % of required concepts did the student mention?"
+- F1 gets artificially low when response is long (low precision), even if all keywords present
+- For concept coverage, recall is the most meaningful metric
+
+---
+
+#### 4. `compute_exact_match(generated, reference, normalize=True)`
 
 Computes exact match accuracy (for MCQ answers).
 
@@ -91,7 +118,7 @@ Computes exact match accuracy (for MCQ answers).
 
 ---
 
-#### 4. `compute_order_score(generated, reference, use_spacy=True)`
+#### 5. `compute_order_score(generated, reference, use_spacy=True)`
 
 Evaluates whether concepts appear in correct order using **dynamic concept extraction**.
 
@@ -127,15 +154,15 @@ Evaluates whether concepts appear in correct order using **dynamic concept extra
 
 ---
 
-#### 5. `compute_all_metrics(generated, reference=None, is_mcq=False, check_order=False)`
+#### 6. `compute_all_metrics(generated, reference=None, expected_keywords=None, is_mcq=False)`
 
 Computes all available metrics in one call.
 
 **Input:**
 - `generated` (str): Model-generated response
-- `reference` (str, optional): Reference answer for ROUGE/text F1/exact match
+- `reference` (str, optional): Reference answer for ROUGE/text F1/exact match/order scoring
+- `expected_keywords` (List[str], optional): Keywords for coverage evaluation
 - `is_mcq` (bool, optional): Whether this is an MCQ (default: False)
-- `check_order` (bool, optional): Evaluate reasoning step order (default: False)
 
 **Output:**
 ```python
@@ -154,9 +181,22 @@ Computes all available metrics in one call.
         'matched_words': ['factorize', 'multiply', 'x'],
         'missing_words': ['simplify'],
         'extra_words': ['the', 'expression']
+    },
+    'order': {
+        'order_score': 1.0,
+        'reference_order': ['factorize', 'multiply', 'simplify'],
+        'generated_order': ['factorize', 'multiply', 'simplify'],
+        'correct_order': True
+    },
+    'keyword_recall': {
+        'recall': 0.80,
+        'matched_keywords': ['chlorine', 'bromine', 'reactive', 'displace'],
+        'missing_keywords': ['halogen']
     }
 }
 ```
+
+**Note:** When reference is provided, both text_f1 and order scoring are **always computed automatically**.
 
 ---
 
@@ -174,12 +214,19 @@ result = metrics.compute_all_metrics(
     generated="Let's solve this step by step..."
 )
 
-# With reference answer (includes ROUGE and text F1)
+# With reference answer (includes ROUGE, text F1, and order scoring)
 result = metrics.compute_all_metrics(
     generated="To factorize x² + 5x + 6...",
     reference="(x+2)(x+3)"
 )
-# Includes: rouge, text_f1
+# Includes: rouge, text_f1, order
+
+# With keywords (measures concept coverage)
+result = metrics.compute_all_metrics(
+    generated="Chlorine is more reactive and displaces bromine",
+    expected_keywords=["chlorine", "reactive", "displace", "bromine", "halogen"]
+)
+# Includes: keyword_recall
 
 # MCQ evaluation
 result = metrics.compute_all_metrics(
@@ -188,13 +235,15 @@ result = metrics.compute_all_metrics(
     is_mcq=True
 )
 
-# Order evaluation (check reasoning step order)
+# Full evaluation (all metrics)
 result = metrics.compute_all_metrics(
     generated="First multiply, then factorize, then simplify",
     reference="First factorize, then multiply, then simplify",
-    check_order=True
+    expected_keywords=["multiply", "factorize", "simplify"]
 )
-print(result['order']['order_score'])  # 0.33 (wrong order)
+print(result['order']['order_score'])  # Order score computed automatically
+print(result['keyword_recall']['recall'])  # Keyword coverage
+print(result['text_f1']['f1'])  # Word overlap
 ```
 
 ### Integration with ModelEvaluator
@@ -253,9 +302,10 @@ with col3:
 |--------|---------------|----------------|
 | ROUGE | `generated`, `reference` | - |
 | Text F1 | `generated`, `reference` | `case_sensitive` |
+| Keyword Recall | `generated`, `expected_keywords` | `case_sensitive` |
 | Exact Match | `generated`, `reference` | `normalize` |
 | Order Score | `generated`, `reference` | `use_spacy` |
-| All Metrics | `generated` | `reference`, `is_mcq`, `check_order` |
+| All Metrics | `generated` | `reference`, `expected_keywords`, `is_mcq` |
 
 ---
 
@@ -276,4 +326,5 @@ All numeric scores are rounded to 4 decimal places for consistency.
 - **Partial inputs**: Provide only what you have; missing inputs skip relevant metrics
 - **Reusable**: Create one `ResponseMetrics` instance and reuse for multiple evaluations
 - **Model-agnostic**: Works with any text generation model
-- **Text F1 always computed**: When reference is provided, text F1 is automatically computed (no keyword list needed)
+- **Automatic metrics when reference provided**: text_f1 and order scoring are always computed
+- **Keyword recall for concept coverage**: Simple recall metric (% of required keywords present) - more meaningful than F1 for coverage
