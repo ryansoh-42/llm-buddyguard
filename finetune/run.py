@@ -104,7 +104,7 @@ def finetune(
         save_strategy="no",
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
-        num_train_epochs=1,
+        num_train_epochs=2,
         fp16=False,
         report_to="none",
         log_level="info",
