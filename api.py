@@ -12,7 +12,7 @@ import uvicorn
 # Initialize FastAPI app
 app = FastAPI(
     title="LLM Metrics API",
-    description="Evaluate model responses with ROUGE, Keyword F1, Exact Match, and Order Scoring",
+    description="Evaluate model responses with ROUGE, Text F1, Exact Match, and Order Scoring",
     version="1.0.0"
 )
 
@@ -25,18 +25,16 @@ class EvaluationRequest(BaseModel):
     """Request body for evaluation endpoint"""
     generated: str = Field(..., description="Model-generated response", min_length=1)
     reference: Optional[str] = Field(None, description="Reference/correct answer")
-    expected_keywords: Optional[List[str]] = Field(None, description="Expected keywords for F1 calculation")
+    expected_keywords: Optional[List[str]] = Field(None, description="Expected keywords for coverage evaluation")
     is_mcq: bool = Field(False, description="Whether this is a multiple choice question")
-    check_order: bool = Field(False, description="Whether to evaluate reasoning step order")
 
     class Config:
         schema_extra = {
             "example": {
                 "generated": "First multiply the terms, then factorize, then simplify",
                 "reference": "First factorize, then multiply, then simplify",
-                "expected_keywords": ["factorize", "multiply", "simplify"],
-                "is_mcq": False,
-                "check_order": True
+                "expected_keywords": ["multiply", "factorize", "simplify"],
+                "is_mcq": False
             }
         }
 
@@ -84,10 +82,15 @@ async def metrics_info():
                 "requires": ["generated", "reference"],
                 "output": "Precision, recall, F-measure for each variant"
             },
-            "keyword_f1": {
-                "description": "Keyword F1 score for concept coverage",
+            "text_f1": {
+                "description": "Text F1 score based on word overlap (always computed when reference provided)",
+                "requires": ["generated", "reference"],
+                "output": "F1, precision, recall, matched/missing/extra words"
+            },
+            "keyword_recall": {
+                "description": "Keyword coverage using simple recall metric",
                 "requires": ["generated", "expected_keywords"],
-                "output": "F1, precision, recall, matched/missing keywords"
+                "output": "Recall score (0-1), matched/missing keywords"
             },
             "exact_match": {
                 "description": "Exact match accuracy for MCQ questions",
@@ -95,8 +98,8 @@ async def metrics_info():
                 "output": "Boolean match, extracted answer, accuracy"
             },
             "order": {
-                "description": "Reasoning step order correctness (dynamic extraction)",
-                "requires": ["generated", "reference", "check_order=true"],
+                "description": "Reasoning step order correctness (dynamic extraction, always computed)",
+                "requires": ["generated", "reference"],
                 "output": "Order score, concept sequences, edit distance"
             },
             "basic": {
@@ -115,10 +118,9 @@ async def evaluate_response(request: EvaluationRequest):
 
     Returns all applicable metrics based on provided inputs:
     - Always: response_length, word_count
-    - If reference provided: rouge scores
-    - If expected_keywords provided: keyword_f1
+    - If reference provided: rouge scores, text_f1, order score
+    - If expected_keywords provided: keyword_recall
     - If is_mcq=true and reference provided: exact_match
-    - If check_order=true and reference provided: order score
     """
     try:
         # Compute all metrics
@@ -126,8 +128,7 @@ async def evaluate_response(request: EvaluationRequest):
             generated=request.generated,
             reference=request.reference,
             expected_keywords=request.expected_keywords,
-            is_mcq=request.is_mcq,
-            check_order=request.check_order
+            is_mcq=request.is_mcq
         )
 
         return EvaluationResponse(
@@ -160,8 +161,7 @@ async def evaluate_batch(requests: List[EvaluationRequest]):
                     generated=request.generated,
                     reference=request.reference,
                     expected_keywords=request.expected_keywords,
-                    is_mcq=request.is_mcq,
-                    check_order=request.check_order
+                    is_mcq=request.is_mcq
                 )
 
                 results.append({

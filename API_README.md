@@ -5,7 +5,7 @@ A FastAPI service that evaluates model responses using multiple metrics in one J
 ## Features
 
 - ✅ **ROUGE Scores** - Text similarity metrics
-- ✅ **Keyword F1** - Concept coverage evaluation
+- ✅ **Text F1** - Word overlap evaluation (automatic, no keyword list needed)
 - ✅ **Exact Match** - MCQ answer grading
 - ✅ **Order Scoring** - Dynamic reasoning step validation
 - ✅ **Batch Evaluation** - Process multiple responses at once
@@ -64,7 +64,6 @@ curl http://localhost:8000/metrics-info
 {
   "generated": "string (required)",
   "reference": "string (optional)",
-  "expected_keywords": ["keyword1", "keyword2"] (optional),
   "is_mcq": false (optional),
   "check_order": false (optional)
 }
@@ -78,7 +77,7 @@ curl http://localhost:8000/metrics-info
     "response_length": 123,
     "word_count": 45,
     "rouge": {...},
-    "keyword_f1": {...},
+    "text_f1": {...},
     "exact_match": {...},
     "order": {...}
   },
@@ -90,7 +89,7 @@ curl http://localhost:8000/metrics-info
 
 ## Usage Examples
 
-### Example 1: Basic Evaluation (ROUGE only)
+### Example 1: Basic Evaluation (ROUGE + Text F1)
 
 **Request:**
 ```bash
@@ -113,6 +112,14 @@ curl -X POST http://localhost:8000/evaluate \
       "rouge1": {"precision": 0.5333, "recall": 0.6154, "fmeasure": 0.5714},
       "rouge2": {"precision": 0.2857, "recall": 0.3077, "fmeasure": 0.2963},
       "rougeL": {"precision": 0.5333, "recall": 0.6154, "fmeasure": 0.5714}
+    },
+    "text_f1": {
+      "precision": 0.5333,
+      "recall": 0.6154,
+      "f1": 0.5714,
+      "matched_words": ["factorize", "x", "5", "6", "to", "get", "2", "3"],
+      "missing_words": ["x+2", "x+3"],
+      "extra_words": ["solve", "by", "finding", "two", "numbers", "that", "multiply"]
     }
   },
   "message": null
@@ -121,42 +128,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 2: With Keywords
-
-**Request:**
-```bash
-curl -X POST http://localhost:8000/evaluate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "generated": "To solve this, factorize the expression and multiply the terms",
-    "expected_keywords": ["factorize", "multiply", "simplify"]
-  }'
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "metrics": {
-    "response_length": 56,
-    "word_count": 10,
-    "keyword_f1": {
-      "precision": 0.2,
-      "recall": 0.6667,
-      "f1": 0.3077,
-      "matched_keywords": ["factorize", "multiply"],
-      "missing_keywords": ["simplify"],
-      "match_count": 2,
-      "expected_count": 3
-    }
-  },
-  "message": null
-}
-```
-
----
-
-### Example 3: Order Scoring (Biology)
+### Example 2: Order Scoring (Biology)
 
 **Request:**
 ```bash
@@ -195,7 +167,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 4: MCQ Evaluation
+### Example 3: MCQ Evaluation
 
 **Request:**
 ```bash
@@ -229,7 +201,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 5: Full Evaluation
+### Example 4: Full Evaluation (with Order Scoring)
 
 **Request:**
 ```bash
@@ -238,7 +210,6 @@ curl -X POST http://localhost:8000/evaluate \
   -d '{
     "generated": "First multiply the terms, then factorize, then simplify",
     "reference": "First factorize, then multiply, then simplify",
-    "expected_keywords": ["factorize", "multiply", "simplify"],
     "check_order": true
   }'
 ```
@@ -255,14 +226,13 @@ curl -X POST http://localhost:8000/evaluate \
       "rouge2": {"precision": 0.5, "recall": 0.5, "fmeasure": 0.5},
       "rougeL": {"precision": 0.7778, "recall": 0.7778, "fmeasure": 0.7778}
     },
-    "keyword_f1": {
-      "precision": 0.3333,
-      "recall": 1.0,
-      "f1": 0.5,
-      "matched_keywords": ["multiply", "factorize", "simplify"],
-      "missing_keywords": [],
-      "match_count": 3,
-      "expected_count": 3
+    "text_f1": {
+      "precision": 0.7778,
+      "recall": 0.7778,
+      "f1": 0.7778,
+      "matched_words": ["first", "multiply", "then", "factorize", "simplify"],
+      "missing_words": [],
+      "extra_words": ["the", "terms"]
     },
     "order": {
       "order_score": 0.3333,
@@ -281,7 +251,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 ---
 
-### Example 6: Batch Evaluation
+### Example 5: Batch Evaluation
 
 **Request:**
 ```bash
@@ -313,7 +283,6 @@ url = "http://localhost:8000/evaluate"
 payload = {
     "generated": "First multiply, then factorize, then simplify",
     "reference": "First factorize, then multiply, then simplify",
-    "expected_keywords": ["factorize", "multiply", "simplify"],
     "check_order": True
 }
 
@@ -326,7 +295,7 @@ if response.status_code == 200:
     metrics = result["metrics"]
 
     print(f"Order Score: {metrics['order']['order_score']}")
-    print(f"Keyword F1: {metrics['keyword_f1']['f1']}")
+    print(f"Text F1: {metrics['text_f1']['f1']}")
     print(f"ROUGE-L: {metrics['rouge']['rougeL']['fmeasure']}")
 else:
     print(f"Error: {response.status_code}")

@@ -2,7 +2,7 @@
 
 ## Overview
 
-`metrics.py` provides a standalone service for evaluating model response quality. It computes ROUGE scores, Keyword F1, exact match accuracy, and safety scores.
+`metrics.py` provides a standalone service for evaluating model response quality. It computes ROUGE scores, Text F1 (word overlap), exact match accuracy, and order scoring.
 
 ## Quick Start
 
@@ -39,61 +39,53 @@ Computes ROUGE scores between generated and reference text.
 
 ---
 
-#### 2. `compute_keyword_f1(generated, expected_keywords, case_sensitive=False)`
+#### 2. `compute_text_f1(generated, reference, case_sensitive=False)`
 
-Computes F1 score based on keyword presence.
+Computes F1 score based on word overlap between generated and reference text. Automatically compares all words - no manual keyword list needed.
 
 **Input:**
 - `generated` (str): Model-generated response
-- `expected_keywords` (List[str]): Keywords that should appear
+- `reference` (str): Reference/correct answer
 - `case_sensitive` (bool, optional): Match case-sensitively (default: False)
 
 **Output:**
 ```python
 {
-    'precision': 0.80,
-    'recall': 0.75,
-    'f1': 0.77,
-    'matched_keywords': ['factorize', 'multiply'],
-    'missing_keywords': ['divide'],
-    'match_count': 2,
-    'expected_count': 3
+    'precision': 0.3333,  # 3 matched / 9 generated words
+    'recall': 0.5000,     # 3 matched / 6 reference words
+    'f1': 0.4000,
+    'matched_words': ['mitosis', 'prophase', 'metaphase'],
+    'missing_words': ['anaphase', 'stages', 'involves'],
+    'extra_words': ['cell', 'divides', 'during', 'through', 'and'],
+    'generated_word_count': 9,
+    'reference_word_count': 6
 }
 ```
 
+**How it works:**
+- Tokenizes both texts into words
+- Uses multisets (Counter) to handle repeated words correctly
+- Calculates precision, recall, F1 based on word overlap
+- Returns detailed analysis of matched, missing, and extra words
+
 ---
 
-#### 3. `compute_exact_match(generated, reference, normalize=True, expected_keywords=None)`
+#### 3. `compute_exact_match(generated, reference, normalize=True)`
 
-Computes exact match accuracy (for MCQ answers). Optionally includes keyword analysis.
+Computes exact match accuracy (for MCQ answers).
 
 **Input:**
 - `generated` (str): Model's answer (e.g., "The answer is B")
 - `reference` (str): Correct answer (e.g., "B")
 - `normalize` (bool, optional): Normalize text before comparison (default: True)
-- `expected_keywords` (List[str], optional): Keywords to check for in response
 
-**Output (without keywords):**
+**Output:**
 ```python
 {
     'exact_match': True,
     'extracted_answer': 'b',
     'reference_answer': 'b',
     'accuracy': 1.0
-}
-```
-
-**Output (with keywords):**
-```python
-{
-    'exact_match': True,
-    'extracted_answer': 'b',
-    'reference_answer': 'b',
-    'accuracy': 1.0,
-    'keyword_f1': 0.85,
-    'keyword_recall': 0.90,
-    'matched_keywords': ['photosynthesis', 'chlorophyll'],
-    'missing_keywords': ['sunlight']
 }
 ```
 
@@ -135,14 +127,13 @@ Evaluates whether concepts appear in correct order using **dynamic concept extra
 
 ---
 
-#### 5. `compute_all_metrics(generated, reference=None, expected_keywords=None, is_mcq=False, check_order=False)`
+#### 5. `compute_all_metrics(generated, reference=None, is_mcq=False, check_order=False)`
 
 Computes all available metrics in one call.
 
 **Input:**
 - `generated` (str): Model-generated response
-- `reference` (str, optional): Reference answer for ROUGE/exact match
-- `expected_keywords` (List[str], optional): Keywords for F1
+- `reference` (str, optional): Reference answer for ROUGE/text F1/exact match
 - `is_mcq` (bool, optional): Whether this is an MCQ (default: False)
 - `check_order` (bool, optional): Evaluate reasoning step order (default: False)
 
@@ -156,12 +147,13 @@ Computes all available metrics in one call.
         'rouge2': {'precision': 0.50, 'recall': 0.50, 'fmeasure': 0.50},
         'rougeL': {'precision': 0.68, 'recall': 0.68, 'fmeasure': 0.68}
     },
-    'keyword_f1': {
-        'precision': 0.20,
-        'recall': 1.0,
-        'f1': 0.33,
-        'matched_keywords': ['factorize', 'multiply', 'add'],
-        'missing_keywords': []
+    'text_f1': {
+        'precision': 0.5000,
+        'recall': 0.6667,
+        'f1': 0.5714,
+        'matched_words': ['factorize', 'multiply', 'x'],
+        'missing_words': ['simplify'],
+        'extra_words': ['the', 'expression']
     }
 }
 ```
@@ -182,17 +174,12 @@ result = metrics.compute_all_metrics(
     generated="Let's solve this step by step..."
 )
 
-# With reference answer
+# With reference answer (includes ROUGE and text F1)
 result = metrics.compute_all_metrics(
     generated="To factorize x² + 5x + 6...",
     reference="(x+2)(x+3)"
 )
-
-# With keywords
-result = metrics.compute_all_metrics(
-    generated="To factorize x² + 5x + 6...",
-    expected_keywords=["factorize", "multiply", "two numbers"]
-)
+# Includes: rouge, text_f1
 
 # MCQ evaluation
 result = metrics.compute_all_metrics(
@@ -265,10 +252,10 @@ with col3:
 | Metric | Required Input | Optional Input |
 |--------|---------------|----------------|
 | ROUGE | `generated`, `reference` | - |
-| Keyword F1 | `generated`, `expected_keywords` | `case_sensitive` |
-| Exact Match | `generated`, `reference` | `normalize`, `expected_keywords` |
+| Text F1 | `generated`, `reference` | `case_sensitive` |
+| Exact Match | `generated`, `reference` | `normalize` |
 | Order Score | `generated`, `reference` | `use_spacy` |
-| All Metrics | `generated` | `reference`, `expected_keywords`, `is_mcq`, `check_order` |
+| All Metrics | `generated` | `reference`, `is_mcq`, `check_order` |
 
 ---
 
@@ -285,7 +272,8 @@ All numeric scores are rounded to 4 decimal places for consistency.
 
 ## Notes
 
-- **No reference needed**: Basic metrics (safety, length) work without reference answers
+- **No reference needed**: Basic metrics (length, word count) work without reference answers
 - **Partial inputs**: Provide only what you have; missing inputs skip relevant metrics
 - **Reusable**: Create one `ResponseMetrics` instance and reuse for multiple evaluations
 - **Model-agnostic**: Works with any text generation model
+- **Text F1 always computed**: When reference is provided, text F1 is automatically computed (no keyword list needed)

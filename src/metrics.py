@@ -78,15 +78,102 @@ class ResponseMetrics:
 
         return result
 
-    def compute_keyword_f1(
+    def compute_text_f1(
+        self,
+        generated: str,
+        reference: str,
+        case_sensitive: bool = False
+    ) -> Dict[str, float]:
+        """
+        Compute F1 score based on word overlap between generated and reference text.
+        Automatically compares all words - no manual keyword list needed.
+
+        Args:
+            generated: Model-generated response
+            reference: Reference/correct answer
+            case_sensitive: Whether to match case-sensitively
+
+        Returns:
+            Dictionary with precision, recall, F1, and word overlap details
+
+        Example:
+            generated: "The cell divides during mitosis through prophase and metaphase"
+            reference: "Mitosis involves prophase, metaphase, and anaphase stages"
+
+            Result: {
+                'precision': 0.3333,  # 3 matches / 9 generated words
+                'recall': 0.5000,     # 3 matches / 6 reference words
+                'f1': 0.4000,
+                'matched_words': ['mitosis', 'prophase', 'metaphase'],
+                'missing_words': ['anaphase', 'stages', 'involves'],
+                'extra_words': ['cell', 'divides', 'during', 'through', 'and']
+            }
+        """
+        # Tokenize and normalize
+        def get_words(text: str) -> List[str]:
+            words = re.findall(r'\b\w+\b', text)
+            return words if case_sensitive else [w.lower() for w in words]
+
+        gen_words = get_words(generated)
+        ref_words = get_words(reference)
+
+        if not ref_words:
+            return {
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1': 0.0,
+                'matched_words': [],
+                'missing_words': [],
+                'extra_words': gen_words,
+                'generated_word_count': len(gen_words),
+                'reference_word_count': 0
+            }
+
+        # Convert to multisets (Counter) to handle repeated words correctly
+        gen_counter = Counter(gen_words)
+        ref_counter = Counter(ref_words)
+
+        # Find intersection (matched words with min count)
+        matched_counter = gen_counter & ref_counter
+        matched_words = list(matched_counter.elements())
+
+        # Find words in reference but not in generated (missing)
+        missing_counter = ref_counter - gen_counter
+        missing_words = list(missing_counter.elements())
+
+        # Find words in generated but not in reference (extra/false positives)
+        extra_counter = gen_counter - ref_counter
+        extra_words = list(extra_counter.elements())
+
+        # Calculate metrics
+        true_positives = len(matched_words)
+        false_positives = len(extra_words)
+        false_negatives = len(missing_words)
+
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0.0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0.0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+        return {
+            'precision': round(precision, 4),
+            'recall': round(recall, 4),
+            'f1': round(f1, 4),
+            'matched_words': matched_words,
+            'missing_words': missing_words,
+            'extra_words': extra_words,
+            'generated_word_count': len(gen_words),
+            'reference_word_count': len(ref_words)
+        }
+
+    def compute_keyword_recall(
         self,
         generated: str,
         expected_keywords: List[str],
         case_sensitive: bool = False
-    ) -> Dict[str, float]:
+    ) -> Dict[str, any]:
         """
-        Compute F1 score based on keyword presence.
-        Useful for checking if essential concepts/terms appear in response.
+        Compute keyword coverage using simple recall metric.
+        Measures what percentage of expected keywords appear in the response.
 
         Args:
             generated: Model-generated response
@@ -94,24 +181,24 @@ class ResponseMetrics:
             case_sensitive: Whether to match case-sensitively
 
         Returns:
-            Dictionary with precision, recall, F1, and matched keywords
+            Dictionary with recall score and keyword details
 
         Example:
             {
-                'precision': 0.80,
-                'recall': 0.75,
-                'f1': 0.77,
-                'matched_keywords': ['factorize', 'multiply'],
-                'missing_keywords': ['divide']
+                'recall': 0.80,          # 4 out of 5 keywords found
+                'matched_keywords': ['chlorine', 'bromine', 'reactive', 'displace'],
+                'missing_keywords': ['halogen'],
+                'match_count': 4,
+                'expected_count': 5
             }
         """
         if not expected_keywords:
             return {
-                'precision': 0.0,
                 'recall': 0.0,
-                'f1': 0.0,
                 'matched_keywords': [],
-                'missing_keywords': []
+                'missing_keywords': [],
+                'match_count': 0,
+                'expected_count': 0
             }
 
         # Prepare text for matching
@@ -130,28 +217,14 @@ class ResponseMetrics:
             else:
                 missing.append(keyword)
 
-        # Calculate metrics
-        true_positives = len(matched)
-        false_negatives = len(missing)
-
-        # Extract potential keywords from generated text for false positives
-        # (words not in expected list but present in response)
-        generated_words = set(re.findall(r'\b\w+\b', text))
-        expected_set = set(keywords)
-        false_positives = len(generated_words - expected_set) if generated_words else 0
-
-        # Calculate precision, recall, F1
-        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0.0
-        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0.0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        # Calculate recall
+        recall = len(matched) / len(keywords) if keywords else 0.0
 
         return {
-            'precision': round(precision, 4),
             'recall': round(recall, 4),
-            'f1': round(f1, 4),
             'matched_keywords': matched,
             'missing_keywords': missing,
-            'match_count': true_positives,
+            'match_count': len(matched),
             'expected_count': len(keywords)
         }
 
@@ -159,21 +232,18 @@ class ResponseMetrics:
         self,
         generated: str,
         reference: str,
-        normalize: bool = True,
-        expected_keywords: Optional[List[str]] = None
+        normalize: bool = True
     ) -> Dict[str, any]:
         """
         Compute exact match accuracy (for MCQ answers).
-        Optionally checks for keyword presence in the response.
 
         Args:
             generated: Model's answer (e.g., "A" or "The answer is B")
             reference: Correct answer (e.g., "A")
             normalize: Whether to normalize text before comparison
-            expected_keywords: Optional keywords to check for in response
 
         Returns:
-            Dictionary with exact match result, extracted answer, and keyword analysis
+            Dictionary with exact match result and extracted answer
         """
         def normalize_text(text: str) -> str:
             """Normalize text for comparison."""
@@ -191,22 +261,12 @@ class ResponseMetrics:
 
         is_match = gen_normalized == ref_normalized
 
-        result = {
+        return {
             'exact_match': is_match,
             'extracted_answer': gen_normalized,
             'reference_answer': ref_normalized,
             'accuracy': 1.0 if is_match else 0.0
         }
-
-        # Add keyword analysis if provided
-        if expected_keywords:
-            keyword_result = self.compute_keyword_f1(generated, expected_keywords)
-            result['keyword_f1'] = keyword_result['f1']
-            result['keyword_recall'] = keyword_result['recall']
-            result['matched_keywords'] = keyword_result['matched_keywords']
-            result['missing_keywords'] = keyword_result['missing_keywords']
-
-        return result
 
     def extract_concepts_from_text(
         self,
@@ -385,18 +445,16 @@ class ResponseMetrics:
         generated: str,
         reference: Optional[str] = None,
         expected_keywords: Optional[List[str]] = None,
-        is_mcq: bool = False,
-        check_order: bool = False
+        is_mcq: bool = False
     ) -> Dict[str, any]:
         """
         Compute all available metrics for a response.
 
         Args:
             generated: Model-generated response
-            reference: Reference answer (for ROUGE and exact match)
-            expected_keywords: Keywords for F1 calculation
+            reference: Reference answer (for ROUGE, text F1, exact match, order scoring)
+            expected_keywords: Keywords for coverage evaluation (optional)
             is_mcq: Whether this is a multiple choice question
-            check_order: Whether to evaluate reasoning step order (requires reference)
 
         Returns:
             Comprehensive dictionary of all metrics
@@ -406,25 +464,24 @@ class ResponseMetrics:
             'word_count': len(generated.split())
         }
 
-        # ROUGE scores (if reference provided)
+        # All metrics that require reference
         if reference:
+            # ROUGE scores
             metrics['rouge'] = self.compute_rouge(generated, reference)
 
-            # Exact match (for MCQ) - includes keyword analysis if provided
+            # Text F1 (always computed when reference is provided)
+            metrics['text_f1'] = self.compute_text_f1(generated, reference)
+
+            # Order scoring (always computed when reference is provided)
+            metrics['order'] = self.compute_order_score(generated, reference)
+
+            # Exact match (for MCQ only)
             if is_mcq:
-                metrics['exact_match'] = self.compute_exact_match(
-                    generated,
-                    reference,
-                    expected_keywords=expected_keywords
-                )
+                metrics['exact_match'] = self.compute_exact_match(generated, reference)
 
-            # Order scoring (if requested)
-            if check_order:
-                metrics['order'] = self.compute_order_score(generated, reference)
-
-        # Keyword F1 (if keywords provided)
+        # Keyword recall (if keywords provided)
         if expected_keywords:
-            metrics['keyword_f1'] = self.compute_keyword_f1(generated, expected_keywords)
+            metrics['keyword_recall'] = self.compute_keyword_recall(generated, expected_keywords)
 
         return metrics
 
@@ -471,12 +528,10 @@ if __name__ == "__main__":
     print(f"Reference: {reference}")
     print(f"ROUGE Scores: {rouge_scores}")
 
-    # Test case 2: Keyword F1
-    print("\n=== TEST 2: Keyword F1 ===")
-    keywords = ["factorize", "multiply", "add"]
-    keyword_f1 = metrics.compute_keyword_f1(generated, keywords)
-    print(f"Expected keywords: {keywords}")
-    print(f"Keyword F1: {keyword_f1}")
+    # Test case 2: Text F1
+    print("\n=== TEST 2: Text F1 ===")
+    text_f1 = metrics.compute_text_f1(generated, reference)
+    print(f"Text F1: {text_f1}")
 
     # Test case 3: Exact Match (MCQ)
     print("\n=== TEST 3: Exact Match (MCQ) ===")
@@ -510,7 +565,6 @@ if __name__ == "__main__":
     all_metrics = metrics.compute_all_metrics(
         generated=generated,
         reference=reference,
-        expected_keywords=keywords,
         check_order=False  # Set to True to include order checking
     )
     print(f"All metrics keys: {list(all_metrics.keys())}")
