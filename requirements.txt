@@ -7,16 +7,28 @@ transformers
 torch
 accelerate
 bitsandbytes
+hf_transfer
+wandb
 
 # Evaluation
 pandas
 numpy
 scikit-learn
 datasets
+rouge-score
+python-Levenshtein
+spacy
 
 # Utilities
 python-dotenv
 tqdm
 
+<<<<<<< HEAD
 # Guardrails
 guardrails-ai
+=======
+# API
+fastapi
+uvicorn[standard]
+pydantic
+>>>>>>> origin/main

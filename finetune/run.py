@@ -1,9 +1,11 @@
+import datetime
 import os
 
 from pathlib import Path
 from typing import Literal
 
 import torch
+import wandb
 
 from dotenv import find_dotenv, load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
@@ -78,7 +80,7 @@ def finetune(
 
 
     def tokenize_func(example: dict[str, str]):
-        tokens = tokenizer(example["prompt"], padding="max_length", truncation=True, max_length=128)
+        tokens = tokenizer(example["prompt"], padding="max_length", truncation=True, max_length=2048)
         tokens["labels"] = [
             -100 if token == tokenizer.pad_token_id else token for token in tokens["input_ids"]
         ]
@@ -98,18 +100,27 @@ def finetune(
     )
 
     model.train()
+
+    NOW_STR = datetime.datetime.now().strftime("%d%m%Y_%H%M%S")
+
+    wandb.init(
+        project="is469_assignment",
+        entity="jskyejet-singapore-management-university",
+        name=f"{subject}_finetune_{NOW_STR}",
+        config={"model_id": model_id, "subject": subject}
+    )
+
     training_args = TrainingArguments(
         output_dir=f"{subject}/results",
         eval_strategy="steps",
-        eval_steps=40,
-        logging_steps=40,
-        logging_dir=f"{subject}/metrics",
+        eval_steps=80,
+        logging_steps=10,
         save_strategy="no",
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
         num_train_epochs=1,
         fp16=False,
-        report_to=["tensorboard"],
+        report_to=["wandb"],
         log_level="info",
         learning_rate=1e-5,
         max_grad_norm=2
@@ -125,8 +136,8 @@ def finetune(
 
     train_result = trainer.train()
 
-    trainer.save_model(f"{subject}/models")
-    tokenizer.save_pretrained(f"{subject}/models")
+    trainer.save_model(f"{subject}")
+    tokenizer.save_pretrained(f"{subject}")
 
     train_metrics = train_result.metrics
     trainer.log_metrics("train", train_metrics)
@@ -136,6 +147,8 @@ def finetune(
     eval_metrics = trainer.evaluate()
     trainer.log_metrics("eval", eval_metrics)
     trainer.save_metrics("eval", eval_metrics)
+
+    wandb.finish(0)
 
     # model.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
     # tokenizer.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
