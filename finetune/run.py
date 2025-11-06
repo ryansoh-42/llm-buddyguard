@@ -22,12 +22,15 @@ assert HF_TOKEN is not None, "Set HF_TOKEN environment variable!"
 
 def create_directories() -> None:
     paths: list[str] = [
-        "results/bio",
-        "results/chem",
-        "results/physics",
-        "models/bio",
-        "models/chem",
-        "models/physics",
+        "bio/results",
+        "chem/results",
+        "physics/results",
+        "bio/metrics",
+        "chem/metrics",
+        "physics/metrics",
+        "bio/models",
+        "chem/models",
+        "physics/models"
     ]
 
     for p in paths:
@@ -96,11 +99,11 @@ def finetune(
 
     model.train()
     training_args = TrainingArguments(
-        output_dir=f"./results/{subject}",
+        output_dir=f"{subject}/results",
         eval_strategy="steps",
         eval_steps=40,
         logging_steps=40,
-        logging_dir="./metrics",
+        logging_dir=f"{subject}./metrics",
         save_strategy="no",
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
@@ -122,8 +125,8 @@ def finetune(
 
     train_result = trainer.train()
 
-    trainer.save_model(f"models/{subject}")
-    tokenizer.save_pretrained(f"models/{subject}")
+    trainer.save_model(f"{subject}/models")
+    tokenizer.save_pretrained(f"{subject}/models")
 
     train_metrics = train_result.metrics
     trainer.log_metrics("train", train_metrics)
