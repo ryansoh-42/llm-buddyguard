@@ -17,3 +17,6 @@ datasets
 # Utilities
 python-dotenv
 tqdm
+
+# Guardrails
+guardrails-ai
