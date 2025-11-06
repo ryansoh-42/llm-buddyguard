@@ -15,12 +15,31 @@ A FastAPI service that evaluates model responses using multiple metrics in one J
 
 ## Installation
 
-```bash
-# Install dependencies
-pip install fastapi uvicorn pydantic
+### Option 1: Install All Dependencies (Recommended)
 
-# Or install from requirements.txt
+```bash
+# Install all dependencies from requirements.txt
 pip install -r requirements.txt
+
+# Download spaCy language model (required for order scoring)
+python -m spacy download en_core_web_sm
+```
+
+### Option 2: Install Only Metrics API Dependencies
+
+```bash
+# Install minimal dependencies for metrics API only
+pip install fastapi uvicorn pydantic rouge-score python-Levenshtein spacy
+
+# Download spaCy language model (required for order scoring)
+python -m spacy download en_core_web_sm
+```
+
+### Verify Installation
+
+```bash
+# Test that metrics work
+python -c "from src.metrics import ResponseMetrics; print('✅ Metrics ready!')"
 ```
 
 ---
