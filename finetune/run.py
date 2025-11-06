@@ -113,7 +113,7 @@ def finetune(
     training_args = TrainingArguments(
         output_dir=f"{subject}/results",
         eval_strategy="steps",
-        eval_steps=40,
+        eval_steps=80,
         logging_steps=10,
         save_strategy="no",
         per_device_train_batch_size=2,
