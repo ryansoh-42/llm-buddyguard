@@ -1,3 +1,4 @@
+import datetime
 import os
 
 from pathlib import Path
@@ -79,7 +80,7 @@ def finetune(
 
 
     def tokenize_func(example: dict[str, str]):
-        tokens = tokenizer(example["prompt"], padding="max_length", truncation=True, max_length=128)
+        tokens = tokenizer(example["prompt"], padding="max_length", truncation=True, max_length=2048)
         tokens["labels"] = [
             -100 if token == tokenizer.pad_token_id else token for token in tokens["input_ids"]
         ]
@@ -100,10 +101,12 @@ def finetune(
 
     model.train()
 
+    NOW_STR = datetime.datetime.now().strftime("%d%m%Y_%H%M%S")
+
     wandb.init(
         project="is469_assignment",
         entity="jskyejet-singapore-management-university",
-        name=f"{subject}_finetune",
+        name=f"{subject}_finetune_{NOW_STR}",
         config={"model_id": model_id, "subject": subject}
     )
 
@@ -144,6 +147,8 @@ def finetune(
     eval_metrics = trainer.evaluate()
     trainer.log_metrics("eval", eval_metrics)
     trainer.save_metrics("eval", eval_metrics)
+
+    wandb.finish(0)
 
     # model.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
     # tokenizer.push_to_hub(f"Fawl/is469_project_{subject}", token=HF_TOKEN)
