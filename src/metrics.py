@@ -564,7 +564,7 @@ if __name__ == "__main__":
     print("\n=== TEST 5: All Metrics ===")
     all_metrics = metrics.compute_all_metrics(
         generated=generated,
-        reference=reference,
-        check_order=False  # Set to True to include order checking
+        reference=reference
     )
     print(f"All metrics keys: {list(all_metrics.keys())}")
+    print(f"Order score included: {all_metrics['order']['order_score']}")

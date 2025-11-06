@@ -15,12 +15,31 @@ A FastAPI service that evaluates model responses using multiple metrics in one J
 
 ## Installation
 
-```bash
-# Install dependencies
-pip install fastapi uvicorn pydantic
+### Option 1: Install All Dependencies (Recommended)
 
-# Or install from requirements.txt
+```bash
+# Install all dependencies from requirements.txt
 pip install -r requirements.txt
+
+# Download spaCy language model (required for order scoring)
+python -m spacy download en_core_web_sm
+```
+
+### Option 2: Install Only Metrics API Dependencies
+
+```bash
+# Install minimal dependencies for metrics API only
+pip install fastapi uvicorn pydantic rouge-score python-Levenshtein spacy
+
+# Download spaCy language model (required for order scoring)
+python -m spacy download en_core_web_sm
+```
+
+### Verify Installation
+
+```bash
+# Test that metrics work
+python -c "from src.metrics import ResponseMetrics; print('✅ Metrics ready!')"
 ```
 
 ---
@@ -83,11 +102,13 @@ curl http://localhost:8000/metrics-info
     "keyword_recall": {...},
     "exact_match": {...}
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
-**Note:** When reference is provided, `text_f1` and `order` are **always computed automatically**.
+**Notes:**
+- When reference is provided, `text_f1` and `order` are **always computed automatically**
+- The `message` field provides feedback about which metrics were computed or skipped
 
 ---
 
@@ -124,9 +145,14 @@ curl -X POST http://localhost:8000/evaluate \
       "matched_words": ["factorize", "x", "5", "6", "to", "get", "2", "3"],
       "missing_words": ["x+2", "x+3"],
       "extra_words": ["solve", "by", "finding", "two", "numbers", "that", "multiply"]
+    },
+    "order": {
+      "order_score": 0.6667,
+      "correct_order": true,
+      "message": "Order matches"
     }
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
@@ -159,7 +185,7 @@ curl -X POST http://localhost:8000/evaluate \
       "expected_count": 5
     }
   },
-  "message": null
+  "message": "No reference provided - skipping ROUGE, Text F1, and Order metrics"
 }
 ```
 
@@ -197,7 +223,7 @@ curl -X POST http://localhost:8000/evaluate \
       "message": "4 edit(s) needed for correct order"
     }
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
@@ -229,9 +255,11 @@ curl -X POST http://localhost:8000/evaluate \
       "extracted_answer": "b",
       "reference_answer": "b",
       "accuracy": 1.0
-    }
+    },
+    "text_f1": {...},
+    "order": {...}
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
@@ -288,7 +316,7 @@ curl -X POST http://localhost:8000/evaluate \
       "expected_count": 3
     }
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
