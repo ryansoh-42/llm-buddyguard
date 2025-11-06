@@ -125,8 +125,8 @@ def finetune(
 
     train_result = trainer.train()
 
-    trainer.save_model(f"{subject}/models")
-    tokenizer.save_pretrained(f"{subject}/models")
+    trainer.save_model(f"{subject}")
+    tokenizer.save_pretrained(f"{subject}")
 
     train_metrics = train_result.metrics
     trainer.log_metrics("train", train_metrics)
