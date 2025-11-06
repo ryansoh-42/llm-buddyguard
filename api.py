@@ -131,10 +131,21 @@ async def evaluate_response(request: EvaluationRequest):
             is_mcq=request.is_mcq
         )
 
+        # Generate informative message about what was computed
+        warnings = []
+        if not request.reference:
+            warnings.append("No reference provided - skipping ROUGE, Text F1, and Order metrics")
+        if not request.expected_keywords:
+            warnings.append("No expected keywords provided - skipping Keyword Recall metric")
+        if request.is_mcq and not request.reference:
+            warnings.append("MCQ mode enabled but no reference provided - skipping Exact Match metric")
+
+        message = "; ".join(warnings) if warnings else "All applicable metrics computed successfully"
+
         return EvaluationResponse(
             status="success",
             metrics=metrics,
-            message=None
+            message=message
         )
 
     except Exception as e:
