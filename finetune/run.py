@@ -102,11 +102,11 @@ def finetune(
 
     wandb.init(
         project="is469_assignment",
-        entity="jskyejet",
+        entity="jskyejet-singapore-management-university",
         name=f"{subject}_finetune",
         config={"model_id": model_id, "subject": subject}
     )
-    
+
     training_args = TrainingArguments(
         output_dir=f"{subject}/results",
         eval_strategy="steps",
