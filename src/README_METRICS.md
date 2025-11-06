@@ -164,6 +164,12 @@ Computes all available metrics in one call.
 - `expected_keywords` (List[str], optional): Keywords for coverage evaluation
 - `is_mcq` (bool, optional): Whether this is an MCQ (default: False)
 
+**What gets computed:**
+- **Always**: `response_length`, `word_count`
+- **If reference provided**: `rouge`, `text_f1`, `order` (always automatic)
+- **If reference + is_mcq=True**: `exact_match`
+- **If expected_keywords provided**: `keyword_recall`
+
 **Output:**
 ```python
 {
@@ -196,7 +202,7 @@ Computes all available metrics in one call.
 }
 ```
 
-**Note:** When reference is provided, both text_f1 and order scoring are **always computed automatically**.
+**Note:** When reference is provided, `text_f1` and `order` scoring are **always computed automatically** - no opt-in required.
 
 ---
 
@@ -239,11 +245,13 @@ result = metrics.compute_all_metrics(
 result = metrics.compute_all_metrics(
     generated="First multiply, then factorize, then simplify",
     reference="First factorize, then multiply, then simplify",
-    expected_keywords=["multiply", "factorize", "simplify"]
+    expected_keywords=["multiply", "factorize", "simplify"],
+    is_mcq=False
 )
-print(result['order']['order_score'])  # Order score computed automatically
+print(result['order']['order_score'])  # Order score (always computed when reference provided)
 print(result['keyword_recall']['recall'])  # Keyword coverage
-print(result['text_f1']['f1'])  # Word overlap
+print(result['text_f1']['f1'])  # Word overlap (always computed when reference provided)
+print(result['rouge']['rougeL']['fmeasure'])  # ROUGE-L F1
 ```
 
 ### Integration with ModelEvaluator
@@ -298,14 +306,14 @@ with col3:
 
 ## Input Requirements Summary
 
-| Metric | Required Input | Optional Input |
-|--------|---------------|----------------|
-| ROUGE | `generated`, `reference` | - |
-| Text F1 | `generated`, `reference` | `case_sensitive` |
-| Keyword Recall | `generated`, `expected_keywords` | `case_sensitive` |
-| Exact Match | `generated`, `reference` | `normalize` |
-| Order Score | `generated`, `reference` | `use_spacy` |
-| All Metrics | `generated` | `reference`, `expected_keywords`, `is_mcq` |
+| Metric | Required Input | Optional Input | Notes |
+|--------|---------------|----------------|-------|
+| ROUGE | `generated`, `reference` | - | Always computed when reference provided |
+| Text F1 | `generated`, `reference` | `case_sensitive` | Always computed when reference provided |
+| Keyword Recall | `generated`, `expected_keywords` | `case_sensitive` | Only when keywords list provided |
+| Exact Match | `generated`, `reference`, `is_mcq=True` | `normalize` | Only for MCQ questions |
+| Order Score | `generated`, `reference` | `use_spacy` | Always computed when reference provided |
+| All Metrics | `generated` | `reference`, `expected_keywords`, `is_mcq` | Computes applicable metrics based on inputs |
 
 ---
 
@@ -325,6 +333,8 @@ All numeric scores are rounded to 4 decimal places for consistency.
 - **No reference needed**: Basic metrics (length, word count) work without reference answers
 - **Partial inputs**: Provide only what you have; missing inputs skip relevant metrics
 - **Reusable**: Create one `ResponseMetrics` instance and reuse for multiple evaluations
-- **Model-agnostic**: Works with any text generation model
-- **Automatic metrics when reference provided**: text_f1 and order scoring are always computed
-- **Keyword recall for concept coverage**: Simple recall metric (% of required keywords present) - more meaningful than F1 for coverage
+- **Model-agnostic**: Works with any text generation model (black-box evaluation)
+- **Automatic metrics when reference provided**: `text_f1` and `order` scoring are always computed - no configuration needed
+- **Keyword recall for concept coverage**: Simple recall metric (% of required keywords present) - more meaningful than F1 for educational use
+- **MCQ evaluation**: Set `is_mcq=True` to add exact match metric; other metrics still computed for explanation quality
+- **Dynamic concept extraction**: Order scoring adapts to any subject/domain automatically
