@@ -49,9 +49,9 @@ def test_basic_evaluation():
 
 
 def test_with_keywords():
-    """Test evaluation with keyword F1"""
+    """Test evaluation with keyword recall"""
     print("=" * 60)
-    print("TEST 3: With Keyword F1")
+    print("TEST 3: With Keyword Recall")
     print("=" * 60)
 
     payload = {
@@ -66,10 +66,10 @@ def test_with_keywords():
         result = response.json()
         metrics = result["metrics"]
 
-        kf1 = metrics['keyword_f1']
-        print(f"Keyword F1: {kf1['f1']}")
-        print(f"Matched: {kf1['matched_keywords']}")
-        print(f"Missing: {kf1['missing_keywords']}\n")
+        kr = metrics['keyword_recall']
+        print(f"Keyword Recall: {kr['recall']}")
+        print(f"Matched: {kr['matched_keywords']}")
+        print(f"Missing: {kr['missing_keywords']}\n")
     else:
         print(f"Error: {response.text}\n")
 
@@ -82,8 +82,7 @@ def test_order_scoring():
 
     payload = {
         "generated": "During mitosis, metaphase happens first, then prophase, then anaphase",
-        "reference": "During mitosis, prophase occurs first, then metaphase, then anaphase",
-        "check_order": True
+        "reference": "During mitosis, prophase occurs first, then metaphase, then anaphase"
     }
 
     response = requests.post(f"{BASE_URL}/evaluate", json=payload)
@@ -138,8 +137,7 @@ def test_full_evaluation():
     payload = {
         "generated": "First multiply the terms, then factorize, then simplify",
         "reference": "First factorize, then multiply, then simplify",
-        "expected_keywords": ["factorize", "multiply", "simplify"],
-        "check_order": True
+        "expected_keywords": ["factorize", "multiply", "simplify"]
     }
 
     response = requests.post(f"{BASE_URL}/evaluate", json=payload)
@@ -151,9 +149,10 @@ def test_full_evaluation():
 
         print("Metrics Computed:")
         print(f"  - ROUGE-L F1: {metrics['rouge']['rougeL']['fmeasure']}")
-        print(f"  - Keyword F1: {metrics['keyword_f1']['f1']}")
+        print(f"  - Keyword Recall: {metrics['keyword_recall']['recall']}")
         print(f"  - Order Score: {metrics['order']['order_score']}")
-        print(f"  - Order Message: {metrics['order']['message']}\n")
+        print(f"  - Order Message: {metrics['order']['message']}")
+        print(f"  - API Message: {result['message']}\n")
     else:
         print(f"Error: {response.text}\n")
 
