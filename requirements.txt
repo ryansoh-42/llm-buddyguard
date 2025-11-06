@@ -13,7 +13,15 @@ pandas
 numpy
 scikit-learn
 datasets
+rouge-score
+python-Levenshtein
+spacy
 
 # Utilities
 python-dotenv
 tqdm
+
+# API
+fastapi
+uvicorn[standard]
+pydantic

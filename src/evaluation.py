@@ -1,16 +1,19 @@
 # src/evaluation.py
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 import re
+from src.metrics import ResponseMetrics
 
 class ModelEvaluator:
     """
     Evaluates model performance on educational tutoring tasks.
+    Integrates with ResponseMetrics for ROUGE, Keyword F1, and other quality metrics.
     """
-    
+
     def __init__(self):
         self.metrics = {}
+        self.response_metrics = ResponseMetrics()
     
     def evaluate_relevance(self, response: str, expected_keywords: List[str]) -> float:
         """
@@ -159,21 +162,28 @@ class ModelEvaluator:
         }
     
     def evaluate_response(
-        self, 
-        response: str, 
+        self,
+        response: str,
         confidence_metrics: Dict = None,
-        expected_keywords: List[str] = None
+        expected_keywords: List[str] = None,
+        reference_answer: Optional[str] = None,
+        is_mcq: bool = False
     ) -> Dict[str, float]:
         """
         Comprehensive evaluation of a single response.
-        
+        Now includes ROUGE scores, Keyword F1, and other quality metrics.
+
         Args:
             response: Model's response
+            confidence_metrics: Optional confidence metrics from model
             expected_keywords: Optional keywords for relevance check
-            
+            reference_answer: Optional reference answer for ROUGE computation
+            is_mcq: Whether this is a multiple-choice question
+
         Returns:
             Dictionary of metric scores
         """
+        # Original metrics
         results = {
             "no_direct_answer": 1.0 if self.check_no_direct_answer(response) else 0.0,
             "step_by_step_score": self.evaluate_step_by_step(response),
@@ -181,22 +191,59 @@ class ModelEvaluator:
             "response_length": len(response),
             "word_count": len(response.split())
         }
-        
+
+        # Legacy relevance score (keep for backward compatibility)
         if expected_keywords:
             results["relevance_score"] = self.evaluate_relevance(response, expected_keywords)
-        
-        base_scores = [
-        results["no_direct_answer"],
-        results["step_by_step_score"],
-        results["tone_score"]
-        ]
-        
+
+        # NEW: Add ROUGE scores if reference answer provided
+        if reference_answer:
+            rouge_scores = self.response_metrics.compute_rouge(response, reference_answer)
+            results["rouge"] = rouge_scores
+            # Add flattened ROUGE F1 scores for easy access
+            results["rouge1_f1"] = rouge_scores["rouge1"]["fmeasure"]
+            results["rouge2_f1"] = rouge_scores["rouge2"]["fmeasure"]
+            results["rougeL_f1"] = rouge_scores["rougeL"]["fmeasure"]
+
+        # NEW: Add Keyword F1 metrics
+        if expected_keywords:
+            keyword_f1_result = self.response_metrics.compute_keyword_f1(response, expected_keywords)
+            results["keyword_f1"] = keyword_f1_result
+            results["keyword_f1_score"] = keyword_f1_result["f1"]
+            results["keyword_recall"] = keyword_f1_result["recall"]
+            results["keyword_precision"] = keyword_f1_result["precision"]
+
+        # NEW: Add exact match for MCQ
+        if is_mcq and reference_answer:
+            exact_match_result = self.response_metrics.compute_exact_match(response, reference_answer)
+            results["exact_match"] = exact_match_result
+            results["mcq_accuracy"] = exact_match_result["accuracy"]
+
+        # NEW: Add safety score
+        safety_result = self.response_metrics.compute_safety_score(response)
+        results["safety"] = safety_result
+        results["safety_score"] = safety_result["safety_score"]
+
+        # Add confidence metrics if provided
         if confidence_metrics:
+            confidence_eval = self.evaluate_confidence(confidence_metrics)
+            results["confidence"] = confidence_eval
+            results["confidence_score"] = confidence_eval["confidence_score"]
+
+        # Calculate overall score
+        base_scores = [
+            results["no_direct_answer"],
+            results["step_by_step_score"],
+            results["tone_score"],
+            results["safety_score"]
+        ]
+
+        if confidence_metrics and "confidence_score" in results:
             base_scores.append(results["confidence_score"])
-        
-            results["overall_score"] = sum(base_scores) / len(base_scores)
-            
-            return results
+
+        results["overall_score"] = sum(base_scores) / len(base_scores)
+
+        return results
     
     def evaluate_dataset(
         self, 
