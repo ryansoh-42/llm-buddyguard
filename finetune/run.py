@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import torch
+import wandb
 
 from dotenv import find_dotenv, load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
@@ -98,18 +99,25 @@ def finetune(
     )
 
     model.train()
+
+    wandb.init(
+        project="is469_assignment",
+        entity="jskyejet",
+        name=f"{subject}_finetune",
+        config={"model_id": model_id, "subject": subject}
+    )
+    
     training_args = TrainingArguments(
         output_dir=f"{subject}/results",
         eval_strategy="steps",
         eval_steps=40,
-        logging_steps=40,
-        logging_dir=f"{subject}/metrics",
+        logging_steps=10,
         save_strategy="no",
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
         num_train_epochs=1,
         fp16=False,
-        report_to=["tensorboard"],
+        report_to=["wandb"],
         log_level="info",
         learning_rate=1e-5,
         max_grad_norm=2
