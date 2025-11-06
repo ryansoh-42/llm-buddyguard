@@ -83,11 +83,13 @@ curl http://localhost:8000/metrics-info
     "keyword_recall": {...},
     "exact_match": {...}
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
-**Note:** When reference is provided, `text_f1` and `order` are **always computed automatically**.
+**Notes:**
+- When reference is provided, `text_f1` and `order` are **always computed automatically**
+- The `message` field provides feedback about which metrics were computed or skipped
 
 ---
 
@@ -124,9 +126,14 @@ curl -X POST http://localhost:8000/evaluate \
       "matched_words": ["factorize", "x", "5", "6", "to", "get", "2", "3"],
       "missing_words": ["x+2", "x+3"],
       "extra_words": ["solve", "by", "finding", "two", "numbers", "that", "multiply"]
+    },
+    "order": {
+      "order_score": 0.6667,
+      "correct_order": true,
+      "message": "Order matches"
     }
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
@@ -159,7 +166,7 @@ curl -X POST http://localhost:8000/evaluate \
       "expected_count": 5
     }
   },
-  "message": null
+  "message": "No reference provided - skipping ROUGE, Text F1, and Order metrics"
 }
 ```
 
@@ -197,7 +204,7 @@ curl -X POST http://localhost:8000/evaluate \
       "message": "4 edit(s) needed for correct order"
     }
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
@@ -229,9 +236,11 @@ curl -X POST http://localhost:8000/evaluate \
       "extracted_answer": "b",
       "reference_answer": "b",
       "accuracy": 1.0
-    }
+    },
+    "text_f1": {...},
+    "order": {...}
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
@@ -288,7 +297,7 @@ curl -X POST http://localhost:8000/evaluate \
       "expected_count": 3
     }
   },
-  "message": null
+  "message": "All applicable metrics computed successfully"
 }
 ```
 
