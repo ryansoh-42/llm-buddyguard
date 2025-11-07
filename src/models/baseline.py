@@ -1,6 +1,13 @@
 # src/models/baseline.py
 from typing import Dict, List, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
+try:
+    from transformers import AutoModelForInference
+    HAS_INFERENCE_MODEL = True
+    print("✅ AutoModelForInference available")
+except ImportError:
+    HAS_INFERENCE_MODEL = False
+    print("ℹ️ AutoModelForInference not available, using AutoModelForCausalLM")
 import torch
 
 class BaselineModel:
@@ -23,12 +30,32 @@ class BaselineModel:
         
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map=device,
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            low_cpu_mem_usage=True
-        )
+        
+        # Try AutoModelForInference first, fallback to AutoModelForCausalLM
+        model_loaded = False
+        if HAS_INFERENCE_MODEL:
+            try:
+                print("🔄 Trying AutoModelForInference (recommended approach)...")
+                self.model = AutoModelForInference.from_pretrained(
+                    model_name,
+                    device_map=device,
+                    dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                    low_cpu_mem_usage=True
+                )
+                print("✅ AutoModelForInference loaded successfully!")
+                model_loaded = True
+            except Exception as e:
+                print(f"⚠️ AutoModelForInference failed: {e}")
+                print("🔄 Falling back to AutoModelForCausalLM...")
+        
+        if not model_loaded:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map=device,
+                dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                low_cpu_mem_usage=True
+            )
+            print("✅ AutoModelForCausalLM loaded as fallback")
         
         # Ensure padding token is set
         if self.tokenizer.pad_token is None:
@@ -39,24 +66,63 @@ class BaselineModel:
 
     def _get_system_prompt(self, subject: str) -> str:
         """Generate system prompt for Singapore O-Level tutoring."""
-        return f"""You are an educational AI tutor for Singapore O-Level students (ages 13-16).
-        You specialise in {subject} following the MOE curriculum.
+        if subject.lower() == "chemistry":
+            return f"""You are an educational AI tutor for Singapore O-Level Chemistry students (ages 13-16).
+You specialise in Chemistry following the MOE curriculum.
 
-        **GUIDELINES:**
-        1. Provide step-by-step explanations WITHOUT giving direct answers
-        2. Use Singapore curriculum terminology and notation
-        3. Highlight key concepts that appear in MOE marking schemes
-        4. Maintain an encouraging, age-appropriate tone
-        5. Refuse off-topic or inappropriate requests politely
+**GUIDELINES:**
+1. Provide clear, step-by-step explanations for chemistry concepts
+2. Use Singapore curriculum terminology and notation
+3. Focus on understanding chemical formulas, reactions, and concepts
+4. Maintain an encouraging, age-appropriate tone
+5. Refuse off-topic or inappropriate requests politely
 
-        **EXAMPLE APPROACH:**
-        Student: "How do I solve x² + 5x + 6 = 0?"
-        You: "Great question! Let's use factorization. First, we need two numbers that:
-        - Multiply to give 6 (the constant term)
-        - Add to give 5 (the coefficient of x)
+When explaining:
+- Start with basic definitions
+- Provide molecular formulas correctly (e.g., H₂O for water)
+- Explain chemical properties and reactions
+- Use examples relevant to daily life when helpful
 
-        Can you think of two numbers that fit these conditions?"
-        """
+Answer chemistry questions directly but explain the reasoning behind your answers.
+"""
+        elif subject.lower() == "physics":
+            return f"""You are an educational AI tutor for Singapore O-Level Physics students (ages 13-16).
+You specialise in Physics following the MOE curriculum.
+
+**GUIDELINES:**
+1. Provide clear, step-by-step explanations for physics concepts
+2. Use Singapore curriculum terminology and notation
+3. Focus on understanding formulas, laws, and physical principles
+4. Maintain an encouraging, age-appropriate tone
+5. Refuse off-topic or inappropriate requests politely
+
+When explaining:
+- Start with fundamental concepts
+- Show relevant formulas and their applications
+- Explain units and measurements
+- Use real-world examples when helpful
+
+Answer physics questions directly but explain the reasoning behind your answers.
+"""
+        else:
+            return f"""You are an educational AI tutor for Singapore O-Level students (ages 13-16).
+You specialise in {subject} following the MOE curriculum.
+
+**GUIDELINES:**
+1. Provide step-by-step explanations WITHOUT giving direct answers
+2. Use Singapore curriculum terminology and notation
+3. Highlight key concepts that appear in MOE marking schemes
+4. Maintain an encouraging, age-appropriate tone
+5. Refuse off-topic or inappropriate requests politely
+
+**EXAMPLE APPROACH:**
+Student: "How do I solve x² + 5x + 6 = 0?"
+You: "Great question! Let's use factorization. First, we need two numbers that:
+- Multiply to give 6 (the constant term)
+- Add to give 5 (the coefficient of x)
+
+Can you think of two numbers that fit these conditions?"
+"""
 
     def generate(
         self,
@@ -80,20 +146,27 @@ class BaselineModel:
             Dictionary with 'response' and 'metadata'
         """
         try:
+            print(f"🔄 Starting generation for: {prompt[:50]}...")
+            
             # Format prompt with system context
             system_prompt = self._get_system_prompt(subject)
             full_prompt = f"{system_prompt}\n\nStudent: {prompt}\n\nTutor:"
+            print(f"📝 Full prompt length: {len(full_prompt)} chars")
             
             # Tokenize
             device = next(self.model.parameters()).device
+            print(f"💻 Using device: {device}")
+            
             inputs = self.tokenizer(
                 full_prompt, 
                 return_tensors="pt", 
                 truncation=True, 
                 max_length=2048
             ).to(device)
+            print(f"🎯 Input tokens: {inputs['input_ids'].shape[1]}")
             
             # Generate
+            print(f"⚡ Starting generation with max_new_tokens={max_new_tokens}, temperature={temperature}")
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
@@ -103,6 +176,12 @@ class BaselineModel:
                     pad_token_id=self.tokenizer.pad_token_id,
                     eos_token_id=self.tokenizer.eos_token_id
                 )
+            print(f"✅ Generation completed! Output shape: {outputs.shape}")
+            
+            # Clear GPU cache after generation to prevent memory buildup
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+                print("🧹 MPS cache cleared")
             
             # Decode only the new tokens
             # outputs is a tensor with shape [batch_size, sequence_length]

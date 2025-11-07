@@ -1,29 +1,26 @@
 # Core dependencies
-streamlit
-openai
+streamlit>=1.28.0
+torch>=2.0.0
+transformers>=4.35.0
+huggingface-hub>=0.17.0
 
-# For baseline model
-transformers
-torch
-accelerate
-bitsandbytes
-hf_transfer
-wandb
+# For evaluation metrics
+rouge-score>=0.1.2
+scikit-learn>=1.3.0
+pandas>=2.0.0
+Levenshtein>=0.21.0
 
-# Evaluation
-pandas
-numpy
-scikit-learn
-datasets
-rouge-score
-python-Levenshtein
-spacy
+# For API (optional)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.4.0
 
-# Utilities
-python-dotenv
-tqdm
+# For environment management
+python-dotenv>=1.0.0
 
-# API
-fastapi
-uvicorn[standard]
-pydantic
+# For OpenAI API (optional)
+openai>=1.3.0
+
+# For spacy (optional, for advanced text processing)
+spacy>=3.7.0
+accelerate>=0.20.0

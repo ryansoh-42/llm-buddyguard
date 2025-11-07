@@ -13,7 +13,7 @@ class EducationalGuardrails:
             "dating", "sex", "hack", "cheat answers"
         ]
         
-        self.allowed_subjects = ["mathematics", "science", "english", "math", "chemistry", "physics", "biology"]
+        self.allowed_subjects = ["physics", "chemistry", "biology"]
     
     def check_appropriate_content(self, prompt: str) -> Tuple[bool, str]:
         """
@@ -32,12 +32,28 @@ class EducationalGuardrails:
             if keyword in prompt_lower:
                 return False, f"This topic ({keyword}) is not appropriate for educational tutoring."
         
-        # Check if it's a subject-related question
+        # For educational contexts, be more permissive since subject is pre-selected
+        # Check for educational question patterns
         has_subject = any(subject in prompt_lower for subject in self.allowed_subjects)
+        has_question_words = any(word in prompt_lower for word in ["what", "how", "why", "when", "where", "explain", "describe", "calculate", "find", "solve"])
         has_question_mark = "?" in prompt
         
-        if not has_subject and not has_question_mark:
-            return False, "Please ask a question related to Mathematics, Science, or English."
+        # Block clearly non-educational content first
+        personal_keywords = ["favorite", "like", "love", "hate", "movie", "game", "food", "color", "music", "sport"]
+        if any(keyword in prompt_lower for keyword in personal_keywords) and not has_subject:
+            return False, "Please ask a question related to Physics, Chemistry, or Biology."
+        
+        # Allow if it has educational keywords
+        if has_subject:
+            return True, "Content is appropriate"
+        
+        # Allow if it looks like an educational question
+        if has_question_words and (has_question_mark or len(prompt.split()) > 2):
+            return True, "Content is appropriate"
+            
+        # Block very short or unclear prompts
+        if len(prompt.split()) < 2:
+            return False, "Please ask a question related to Physics, Chemistry, or Biology."
         
         return True, "Content is appropriate"
     
