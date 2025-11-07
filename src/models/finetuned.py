@@ -52,15 +52,46 @@ class FineTunedModel:
             self.model_name,
             token=hf_token
         )
-        
-        # Load model
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            device_map=device,
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            low_cpu_mem_usage=True,
-            token=hf_token
-        )
+
+        # Load config and fix model_type if missing
+        from transformers import AutoConfig
+        try:
+            config = AutoConfig.from_pretrained(self.model_name, token=hf_token)
+            # Check if model_type is missing or invalid
+            if not hasattr(config, 'model_type') or not config.model_type or config.model_type == "":
+                # Set model type explicitly for Llama-based models
+                config.model_type = "llama"
+                print(f"Fixed missing model_type in config, set to 'llama'")
+        except Exception as config_error:
+            print(f"Warning: Could not load config: {config_error}")
+            # Create a minimal config with model_type
+            from transformers import LlamaConfig
+            config = LlamaConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct", token=hf_token)
+            print("Using base Llama config as fallback")
+
+        # Load model with fixed config and trust_remote_code
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                config=config,
+                device_map=device,
+                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                low_cpu_mem_usage=True,
+                token=hf_token,
+                trust_remote_code=True  # Allow loading models with custom code/config
+            )
+        except Exception as model_error:
+            # If loading with config fails, try without config (let transformers infer)
+            print(f"Warning: Loading with config failed: {model_error}")
+            print("Attempting to load without explicit config...")
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                device_map=device,
+                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                low_cpu_mem_usage=True,
+                token=hf_token,
+                trust_remote_code=True
+            )
         
         # Ensure padding token is set
         if self.tokenizer.pad_token is None:

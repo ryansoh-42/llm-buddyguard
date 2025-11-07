@@ -23,12 +23,10 @@ spacy
 python-dotenv
 tqdm
 
-<<<<<<< HEAD
 # Guardrails
 guardrails-ai
-=======
+
 # API
 fastapi
 uvicorn[standard]
 pydantic
->>>>>>> origin/main

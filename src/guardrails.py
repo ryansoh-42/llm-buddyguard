@@ -61,7 +61,7 @@ class EducationalGuardrails:
             ),
             # Topic restriction - ensure content is about allowed subjects
             RestrictToTopic(
-                topics=allowed_topics,
+                valid_topics=allowed_topics,
                 on_fail=OnFailAction.EXCEPTION
             )
         )
@@ -122,23 +122,28 @@ class EducationalGuardrails:
             # Extract violation details from exception
             error_message = str(e)
             violations = []
-            detected_content = None
+            detected_content_list = []  # Collect all detected content from multiple violations
             
             # Parse error message to identify violation type and extract details
             error_lower = error_message.lower()
             
             if "toxic" in error_lower or "toxiclanguage" in error_lower:
                 # Try to extract specific toxic content if available
-                detected_content = self._extract_detected_content(error_message, "toxic")
+                content = self._extract_detected_content(error_message, "toxic")
+                if content:
+                    detected_content_list.append(f"toxic: {content}")
                 violations.append({
                     "category": "toxic",
                     "severity": "high",
                     "reason": "Content contains toxic, harmful, or inappropriate language",
                     "details": "The message includes language that may be offensive, harmful, or inappropriate for an educational environment."
                 })
-            elif "pii" in error_lower or "detectpii" in error_lower:
+            
+            if "pii" in error_lower or "detectpii" in error_lower:
                 # Try to extract PII types detected
-                detected_content = self._extract_detected_content(error_message, "pii")
+                content = self._extract_detected_content(error_message, "pii")
+                if content:
+                    detected_content_list.append(f"pii: {content}")
                 pii_types = self._extract_pii_types(error_message)
                 reason = "Content contains personally identifiable information"
                 if pii_types:
@@ -149,23 +154,31 @@ class EducationalGuardrails:
                     "reason": reason,
                     "details": "Personal information such as email addresses, phone numbers, credit cards, or other sensitive data was detected."
                 })
-            elif "profanity" in error_lower or "profanityfree" in error_lower:
-                detected_content = self._extract_detected_content(error_message, "profanity")
+            
+            if "profanity" in error_lower or "profanityfree" in error_lower:
+                content = self._extract_detected_content(error_message, "profanity")
+                if content:
+                    detected_content_list.append(f"profanity: {content}")
                 violations.append({
                     "category": "profanity",
                     "severity": "medium",
                     "reason": "Content contains profane or inappropriate language",
                     "details": "The message includes words or phrases that are not appropriate for an educational setting."
                 })
-            elif "topic" in error_lower or "restricttotopic" in error_lower:
-                detected_content = self._extract_detected_content(error_message, "topic")
+            
+            if "topic" in error_lower or "restricttotopic" in error_lower:
+                content = self._extract_detected_content(error_message, "topic")
+                if content:
+                    detected_content_list.append(f"topic: {content}")
                 violations.append({
                     "category": "off_topic",
                     "severity": "medium",
                     "reason": "Content is not related to allowed educational topics (Physics, Chemistry, Biology)",
                     "details": "The question does not appear to be related to Physics, Chemistry, or Biology subjects."
                 })
-            else:
+            
+            # If no specific violations were detected, add an unspecified violation
+            if not violations:
                 violations.append({
                     "category": "unspecified",
                     "severity": "medium",
@@ -182,8 +195,9 @@ class EducationalGuardrails:
                 "validated_text": None
             }
             
-            if detected_content:
-                result["detected_content"] = detected_content
+            # Include all detected content if any was found
+            if detected_content_list:
+                result["detected_content"] = "; ".join(detected_content_list)
                 
             return result
     
@@ -192,8 +206,39 @@ class EducationalGuardrails:
         if not violations:
             return "Content is not appropriate for educational use."
         
-        category = violations[0].get("category", "unspecified")
+        # If multiple violations, prioritize by severity (high > medium)
+        # Sort violations by severity (high first)
+        severity_order = {"high": 0, "medium": 1, "low": 2}
+        sorted_violations = sorted(
+            violations, 
+            key=lambda v: severity_order.get(v.get("severity", "medium"), 1)
+        )
         
+        # Get primary category from most severe violation
+        primary_category = sorted_violations[0].get("category", "unspecified")
+        
+        # If multiple violations, mention them
+        if len(violations) > 1:
+            categories = [v.get("category", "unspecified") for v in sorted_violations]
+            unique_categories = list(dict.fromkeys(categories))  # Preserve order, remove duplicates
+            
+            messages = {
+                "toxic": "Your message contains inappropriate language. Please rephrase your question.",
+                "pii": "Please do not share personal information. Ask your question without including personal details.",
+                "profanity": "Your message contains inappropriate language. Please use respectful language.",
+                "off_topic": "Please ask a question related to Physics, Chemistry, or Biology.",
+                "unspecified": "Your message could not be processed. Please rephrase your question."
+            }
+            
+            primary_message = messages.get(primary_category, messages["unspecified"])
+            
+            # Add note about multiple issues if applicable
+            if len(unique_categories) > 1:
+                return f"{primary_message} (Multiple issues detected: {', '.join(unique_categories)})"
+            
+            return primary_message
+        
+        # Single violation - use standard message
         messages = {
             "toxic": "Your message contains inappropriate language. Please rephrase your question.",
             "pii": "Please do not share personal information. Ask your question without including personal details.",
@@ -202,7 +247,7 @@ class EducationalGuardrails:
             "unspecified": "Your message could not be processed. Please rephrase your question."
         }
         
-        return messages.get(category, messages["unspecified"])
+        return messages.get(primary_category, messages["unspecified"])
     
     def _extract_detected_content(self, error_message: str, violation_type: str) -> Optional[str]:
         """
@@ -216,7 +261,6 @@ class EducationalGuardrails:
             Detected content string or None
         """
         # Try to extract quoted content or specific patterns
-        import re
         
         # Look for quoted strings in error message
         quoted = re.findall(r'"([^"]+)"', error_message)
@@ -300,12 +344,23 @@ class EducationalGuardrails:
         safety_result = self.check_safety_with_guardrails(prompt, is_input=True)
         
         if not safety_result["allowed"]:
+            # Get primary category from most severe violation, or default to "safety"
+            primary_category = "safety"
+            if safety_result.get("violations"):
+                # Sort by severity to get most severe violation
+                severity_order = {"high": 0, "medium": 1, "low": 2}
+                sorted_violations = sorted(
+                    safety_result["violations"],
+                    key=lambda v: severity_order.get(v.get("severity", "medium"), 1)
+                )
+                primary_category = sorted_violations[0].get("category", "safety")
+            
             return {
                 "allowed": False,
                 "message": safety_result["message"],
-                "category": safety_result["violations"][0]["category"] if safety_result["violations"] else "safety",
+                "category": primary_category,
                 "modified_prompt": None,
-                "violations": safety_result["violations"]
+                "violations": safety_result.get("violations", [])
             }
         
         # Layer 2: Check for answer-seeking behavior (educational guardrail)
@@ -346,12 +401,24 @@ class EducationalGuardrails:
             
             if not safety_result["allowed"]:
                 logger.warning(f"Response flagged: {safety_result['message']}")
+                
+                # Get primary category from most severe violation, or default to "unspecified"
+                primary_category = "unspecified"
+                if safety_result.get("violations"):
+                    # Sort by severity to get most severe violation
+                    severity_order = {"high": 0, "medium": 1, "low": 2}
+                    sorted_violations = sorted(
+                        safety_result["violations"],
+                        key=lambda v: severity_order.get(v.get("severity", "medium"), 1)
+                    )
+                    primary_category = sorted_violations[0].get("category", "unspecified")
+                
                 return {
                     "is_safe": False,
                     "message": safety_result["message"],
                     "violations": safety_result.get("violations", []),
                     "detected_content": safety_result.get("detected_content"),
-                    "category": safety_result.get("violations", [{}])[0].get("category", "unspecified") if safety_result.get("violations") else "unspecified"
+                    "category": primary_category
                 }
             
             return {
