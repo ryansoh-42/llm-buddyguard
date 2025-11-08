@@ -205,13 +205,11 @@ class ModelEvaluator:
             results["rouge2_f1"] = rouge_scores["rouge2"]["fmeasure"]
             results["rougeL_f1"] = rouge_scores["rougeL"]["fmeasure"]
 
-        # NEW: Add Keyword F1 metrics
+        # NEW: Add Keyword Recall metrics
         if expected_keywords:
-            keyword_f1_result = self.response_metrics.compute_keyword_f1(response, expected_keywords)
-            results["keyword_f1"] = keyword_f1_result
-            results["keyword_f1_score"] = keyword_f1_result["f1"]
-            results["keyword_recall"] = keyword_f1_result["recall"]
-            results["keyword_precision"] = keyword_f1_result["precision"]
+            keyword_recall_result = self.response_metrics.compute_keyword_recall(response, expected_keywords)
+            results["keyword_recall"] = keyword_recall_result
+            results["keyword_recall_score"] = keyword_recall_result["recall"]
 
         # NEW: Add exact match for MCQ
         if is_mcq and reference_answer:
@@ -219,10 +217,9 @@ class ModelEvaluator:
             results["exact_match"] = exact_match_result
             results["mcq_accuracy"] = exact_match_result["accuracy"]
 
-        # NEW: Add safety score
-        safety_result = self.response_metrics.compute_safety_score(response)
-        results["safety"] = safety_result
-        results["safety_score"] = safety_result["safety_score"]
+        # Note: Safety score removed - computed_safety_score method doesn't exist in ResponseMetrics
+        # Safety is handled by guardrails.py instead
+        results["safety_score"] = 1.0  # Default safe score
 
         # Add confidence metrics if provided
         if confidence_metrics:

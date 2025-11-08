@@ -4,6 +4,8 @@ from src.models.finetune import FineTunedModel
 from src.models.frontier import FrontierModel
 from src.guardrails import EducationalGuardrails
 from src.evaluation import ModelEvaluator
+from src.metrics import ResponseMetrics
+import requests
 import os
 
 # Page config
@@ -82,6 +84,156 @@ def load_models():
 baseline_model, frontier_model, subject_models, baseline_ok, frontier_ok, subject_ok, available_subjects = load_models()
 guardrails = EducationalGuardrails()
 evaluator = ModelEvaluator()
+api_metrics = ResponseMetrics()  # For comprehensive API-style metrics
+
+def display_dual_metrics(response, reference_answer=None, expected_keywords=None):
+    """Display both educational and API metrics side by side."""
+    
+    # Get both metric types
+    educational_metrics = evaluator.evaluate_response(response)
+    api_metrics_result = api_metrics.compute_all_metrics(
+        generated=response,
+        reference=reference_answer,
+        expected_keywords=expected_keywords
+    )
+    
+    # Display in tabs
+    tab1, tab2 = st.tabs(["📚 Educational Quality", "🔬 Technical Analysis"])
+    
+    with tab1:
+        st.markdown("**Educational Metrics** - Teaching effectiveness")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("No Direct Answer", f"{educational_metrics.get('no_direct_answer', 0):.1f}")
+            st.metric("Step-by-Step", f"{educational_metrics.get('step_by_step_score', 0):.2f}")
+        
+        with col2:
+            st.metric("Tone Quality", f"{educational_metrics.get('tone_score', 0):.2f}")
+            st.metric("Overall Score", f"{educational_metrics.get('overall_score', 0):.2f}")
+        
+        with col3:
+            st.metric("Response Length", educational_metrics.get('response_length', 0))
+            st.metric("Word Count", educational_metrics.get('word_count', 0))
+    
+    with tab2:
+        st.markdown("**API Metrics** - Content accuracy & reasoning")
+        
+        if reference_answer:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Content Similarity (ROUGE)**")
+                rouge = api_metrics_result.get('rouge', {})
+                for rouge_type in ['rouge1', 'rouge2', 'rougeL']:
+                    if rouge_type in rouge:
+                        score = rouge[rouge_type]['fmeasure']
+                        st.metric(rouge_type.upper(), f"{score:.3f}")
+            
+            with col2:
+                st.markdown("**Reasoning Order**")
+                order = api_metrics_result.get('order', {})
+                if order:
+                    st.metric("Order Score", f"{order.get('order_score', 0):.3f}")
+                    st.text(f"Status: {order.get('message', 'N/A')}")
+        
+        if expected_keywords:
+            st.markdown("**Keyword Coverage**")
+            keyword_recall = api_metrics_result.get('keyword_recall', {})
+            if keyword_recall:
+                st.metric("Keyword Recall", f"{keyword_recall.get('recall', 0):.3f}")
+                st.write(f"✅ Found: {keyword_recall.get('matched_keywords', [])}")
+                st.write(f"❌ Missing: {keyword_recall.get('missing_keywords', [])}")
+        
+        # Basic stats
+        st.markdown("**Response Statistics**")
+        st.metric("Response Length", api_metrics_result.get('response_length', 0))
+        st.metric("Word Count", api_metrics_result.get('word_count', 0))
+
+def get_api_metrics(response, reference_answer=None, expected_keywords=None):
+    """Get metrics from the backend API server."""
+    try:
+        payload = {
+            "generated": response,
+            "reference": reference_answer,
+            "expected_keywords": expected_keywords or []
+        }
+        
+        response_api = requests.post("http://localhost:8000/evaluate", json=payload, timeout=10)
+        if response_api.status_code == 200:
+            return response_api.json()
+        else:
+            st.error(f"API Error: {response_api.status_code}")
+            return None
+    except requests.exceptions.RequestException as e:
+        st.warning(f"API not available: {e}")
+        return None
+
+def display_triple_metrics(response, reference_answer=None, expected_keywords=None):
+    """Display educational, direct API, AND backend API metrics."""
+    
+    # Get all three metric types
+    educational_metrics = evaluator.evaluate_response(response)
+    direct_api_metrics = api_metrics.compute_all_metrics(
+        generated=response,
+        reference=reference_answer,
+        expected_keywords=expected_keywords
+    )
+    backend_api_result = get_api_metrics(response, reference_answer, expected_keywords)
+    
+    # Display in tabs
+    tab1, tab2, tab3 = st.tabs(["📚 Educational", "🔬 Direct API", "🌐 Backend API"])
+    
+    with tab1:
+        st.markdown("**Educational Metrics** - Teaching effectiveness")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("No Direct Answer", f"{educational_metrics.get('no_direct_answer', 0):.1f}")
+            st.metric("Step-by-Step", f"{educational_metrics.get('step_by_step_score', 0):.2f}")
+        
+        with col2:
+            st.metric("Tone Quality", f"{educational_metrics.get('tone_score', 0):.2f}")
+            st.metric("Overall Score", f"{educational_metrics.get('overall_score', 0):.2f}")
+    
+    with tab2:
+        st.markdown("**Direct API Metrics** - Content accuracy (embedded)")
+        
+        if expected_keywords:
+            keyword_recall = direct_api_metrics.get('keyword_recall', {})
+            if keyword_recall:
+                st.metric("Keyword Recall", f"{keyword_recall.get('recall', 0):.3f}")
+                st.write(f"✅ Found: {keyword_recall.get('matched_keywords', [])}")
+        
+        if reference_answer:
+            order = direct_api_metrics.get('order', {})
+            if order:
+                st.metric("Order Score", f"{order.get('order_score', 0):.3f}")
+                st.text(f"Status: {order.get('message', 'N/A')}")
+    
+    with tab3:
+        st.markdown("**Backend API Metrics** - Independent validation")
+        
+        if backend_api_result:
+            api_metrics_data = backend_api_result.get('metrics', {})
+            
+            if expected_keywords:
+                keyword_recall = api_metrics_data.get('keyword_recall', {})
+                if keyword_recall:
+                    st.metric("Keyword Recall", f"{keyword_recall.get('recall', 0):.3f}")
+                    st.write(f"✅ Found: {keyword_recall.get('matched_keywords', [])}")
+            
+            if reference_answer:
+                order = api_metrics_data.get('order', {})
+                if order:
+                    st.metric("Order Score", f"{order.get('order_score', 0):.3f}")
+                    st.text(f"Status: {order.get('message', 'N/A')}")
+            
+            # Show API response info
+            st.info(f"API Status: {backend_api_result.get('status', 'unknown')}")
+            st.text(f"Message: {backend_api_result.get('message', 'N/A')}")
+        else:
+            st.error("Backend API not available")
 
 # Sidebar
 st.sidebar.title("Settings")
@@ -108,11 +260,30 @@ subject = st.sidebar.selectbox(
     help="Select your subject. All subjects have fine-tuned models available."
 )
 
+# Safety guardrails toggle
+if "safety_mode_enabled" not in st.session_state:
+    st.session_state.safety_mode_enabled = True
+
+enable_safety_mode = st.sidebar.checkbox(
+    "Enable Safety Guardrails",
+    value=st.session_state.safety_mode_enabled,
+    help="Toggle safety checks for inappropriate content and off-topic questions"
+)
+
+# Update session state when toggle changes
+st.session_state.safety_mode_enabled = enable_safety_mode
+
 show_metrics = st.sidebar.checkbox("Show Evaluation Metrics", value=False)
 
 # Main interface
 st.title("LLM BuddyGuard - O-Level Tutor")
 st.markdown("Your AI study companion for Singapore O-Level examinations")
+
+# Safety status indicator
+if enable_safety_mode:
+    st.success("🛡️ Safety guardrails are enabled - Content filtering active")
+else:
+    st.warning("🔓 Safety guardrails are disabled - All content allowed")
 
 # Model status
 col1, col2, col3 = st.columns(3)
@@ -144,8 +315,17 @@ for message in st.session_state.messages:
 
 # Chat input
 if prompt := st.chat_input("Ask your O-Level question..."):
-    # Apply guardrails
-    guardrail_result = guardrails.apply_guardrails(prompt)
+    # Apply guardrails only if enabled
+    if enable_safety_mode:
+        guardrail_result = guardrails.apply_guardrails(prompt)
+    else:
+        # Bypass guardrails when disabled
+        guardrail_result = {
+            "allowed": True,
+            "message": "Safety guardrails disabled",
+            "modified_prompt": prompt
+        }
+        st.info("🔓 Safety guardrails are currently disabled")
     
     if not guardrail_result["allowed"]:
         st.error(guardrail_result["message"])
@@ -155,8 +335,8 @@ if prompt := st.chat_input("Ask your O-Level question..."):
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Show warning if answer-seeking detected
-        if guardrail_result["message"] != "Prompt approved":
+        # Show warning if answer-seeking detected (only when guardrails are enabled)
+        if enable_safety_mode and guardrail_result["message"] not in ["Prompt approved", "Safety guardrails disabled"]:
             st.warning(guardrail_result["message"])
         
         # Generate response
@@ -179,10 +359,35 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                                                 subject_models.get(subject) != baseline_model) else "base"
                     
                     with st.spinner(f"Using {model_type} model for {subject}..."):
-                        result = model_to_use.generate(prompt, subject=subject, max_new_tokens=128, temperature=0.3)
+                        result = model_to_use.generate(prompt, subject=subject, max_new_tokens=200, temperature=0.3)
                         st.markdown(result["response"])
                         
                         if show_metrics:
+                            # Define chemistry-specific keywords for API metrics
+                            chemistry_keywords = ["atoms", "molecules", "electrons", "bonds", "equation", "balance", "reaction", "chemical", "formula"]
+                            
+                            # Call backend API silently in background (no UI display)
+                            backend_result = get_api_metrics(
+                                response=result["response"],
+                                reference_answer=None,
+                                expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
+                            )
+                            
+                            # Log API result for debugging (not shown to user)
+                            if backend_result:
+                                print(f"✅ Backend API called successfully: {backend_result['status']}")
+                            else:
+                                print("❌ Backend API failed")
+                            
+                            # Display the original 2-tab metrics UI
+                            with st.expander("📊 Complete Evaluation Metrics"):
+                                display_dual_metrics(
+                                    response=result["response"],
+                                    reference_answer=None,
+                                    expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
+                                )
+                            
+                            # Store basic metrics for session
                             metrics = evaluator.evaluate_response(result["response"])
                             st.session_state.messages.append({
                                 "role": "assistant",
@@ -224,9 +429,19 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                     response_placeholder.markdown(full_response)
                 
                 if show_metrics:
+                    # Define some sample expected keywords for chemistry
+                    chemistry_keywords = ["atoms", "molecules", "electrons", "bonds", "equation", "balance", "reaction"]
+                    
+                    # Display dual metrics with enhanced info
+                    with st.expander("📊 Complete Evaluation Metrics"):
+                        display_dual_metrics(
+                            response=full_response,
+                            reference_answer=None,  # Could be enhanced with reference answers
+                            expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
+                        )
+                    
+                    # Store basic metrics for session
                     metrics = evaluator.evaluate_response(full_response)
-                    with st.expander("Evaluation Metrics"):
-                        st.json(metrics)
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": full_response,
@@ -299,8 +514,13 @@ st.sidebar.markdown("""
    - **Subject-Specific**: Fine-tuned models for Physics/Chemistry/Biology
    - **General Baseline**: General purpose model
    - **Frontier**: GPT-4o for comparison
-3. **Ask your O-Level question**
-4. **Get step-by-step guidance!**
+3. **Toggle safety guardrails** (on/off)
+4. **Ask your O-Level question**
+5. **Get step-by-step guidance!**
+
+### Safety Features
+- **🛡️ Guardrails ON**: Blocks inappropriate content and off-topic questions
+- **🔓 Guardrails OFF**: Allows all questions (use with caution)
 
 ### Model Info
 - **🔬 Physics/Chemistry/Biology**: Fine-tuned on Singapore O-Level content
