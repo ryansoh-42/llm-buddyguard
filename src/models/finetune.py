@@ -130,7 +130,7 @@ Can you think of two numbers that fit these conditions?"
         prompt: str,
         subject: str = "Mathematics",
         temperature: float = 0.7,
-        max_new_tokens: int = 512,
+        max_new_tokens: int = 256,
         do_sample: bool = True
     ) -> Dict:
         """

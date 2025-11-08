@@ -42,6 +42,121 @@ class ResponseMetrics:
             use_stemmer=True
         )
 
+    def _fact_normalize_context(self, ctx):
+        """
+        Accept a single string or a list/tuple of strings and return List[str].
+        """
+        if ctx is None:
+            return []
+        if isinstance(ctx, str):
+            return [ctx]
+        try:
+            return [str(c) for c in ctx if c is not None]
+        except TypeError:
+            return [str(ctx)]
+
+    # Helper 2: light tokenizer (used for both sentence and context)
+    def _fact_tokens(self, text: str):
+        # Lowercase alphanumeric-ish tokens; keeps it dependency-free and robust to punctuation
+        return re.findall(r"[a-zA-Z0-9°Ω]+", (text or "").lower())
+
+    # Helper 3: decide if ONE sentence is supported by ANY context
+    def _fact_supported(self, sentence: str, contexts: list, overlap_threshold: float, min_phrase_hits: int) -> bool:
+        """
+        A sentence is supported if:
+        - It contains at least `min_phrase_hits` context phrases (for short contexts), OR
+        - Its unigram/bigram Jaccard overlap with ANY (long) context >= overlap_threshold.
+        """
+        s_lower = (sentence or "").lower()
+        s_tokens = self._fact_tokens(sentence)
+
+        # Quick exit for empty sentence
+        if not s_tokens:
+            return False
+
+        # Count phrase hits for short contexts (<= 8 tokens)
+        phrase_hits = 0
+        for ctx in contexts:
+            ctx_lower = (ctx or "").lower().strip()
+            if not ctx_lower:
+                continue
+            ctx_tokens = self._fact_tokens(ctx_lower)
+
+            if len(ctx_tokens) <= 8:  # treat as phrase-like
+                # Prefer word-boundary match; fall back to substring for punctuation/markdown cases
+                pattern = r'\b' + re.escape(ctx_lower) + r'\b'
+                if re.search(pattern, s_lower) or ctx_lower in s_lower:
+                    phrase_hits += 1
+                    if phrase_hits >= min_phrase_hits:
+                        return True
+
+    # If phrase hits not enough, fall back to lexical overlap vs long contexts
+        def jaccard(a, b):
+            A, B = set(a), set(b)
+            if not A and not B:
+                return 1.0
+            if not A or not B:
+                return 0.0
+            return len(A & B) / len(A | B)
+
+        def bigrams(tokens):
+            return [" ".join(tokens[i:i+2]) for i in range(len(tokens) - 1)] if len(tokens) >= 2 else []
+
+        s_bigrams = bigrams(s_tokens)
+
+        for ctx in contexts:
+            ctx_tokens = self._fact_tokens(ctx)
+            # Heuristic: treat longer contexts as passages for overlap scoring
+            if len(ctx_tokens) > 8:
+                c_bigrams = bigrams(ctx_tokens)
+                uni = jaccard(s_tokens, ctx_tokens)
+                bi = jaccard(s_bigrams, c_bigrams)
+                overlap = 0.7 * uni + 0.3 * bi
+                if overlap >= overlap_threshold:
+                    return True
+
+        return False
+
+    # Main API: compute FActScore (proxy)
+    def compute_factscore(
+        self,
+        generated: str,
+        context_text,                      # str or List[str]
+        overlap_threshold: float = 0.35,
+        min_tokens_per_fact: int = 5,
+        min_phrase_hits: int = 1
+    ) -> Dict[str, float]:
+        """
+        Split generation into 'atomic facts' (short sentences) and compute:
+            factscore_score = supported_facts / total_facts
+
+        Supported if:
+        - sentence matches ≥ min_phrase_hits context phrases (short contexts), OR
+        - unigram+bigram Jaccard overlap with any long context ≥ overlap_threshold.
+        """
+        contexts = self._fact_normalize_context(context_text)
+        if not generated or not contexts:
+            return {"factscore_supported": 0, "factscore_total_facts": 0, "factscore_score": 0.0}
+
+        # Slice into atomic sentences; ignore very short fragments
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", generated.strip())
+        atomic = [s for s in sentences if len(self._fact_tokens(s)) >= min_tokens_per_fact]
+        if not atomic:
+            return {"factscore_supported": 0, "factscore_total_facts": 0, "factscore_score": 0.0}
+
+        supported = sum(
+            1 for s in atomic
+            if self._fact_supported(s, contexts, overlap_threshold, min_phrase_hits)
+        )
+
+        score = supported / len(atomic)
+        return {
+            "factscore_supported": supported,
+            "factscore_total_facts": len(atomic),
+            "factscore_score": round(score, 4)
+        }
+
+
     def compute_rouge(
         self,
         generated: str,
@@ -445,43 +560,30 @@ class ResponseMetrics:
         generated: str,
         reference: Optional[str] = None,
         expected_keywords: Optional[List[str]] = None,
-        is_mcq: bool = False
+        is_mcq: bool = False,
+        context: Optional[str] = None
     ) -> Dict[str, any]:
         """
         Compute all available metrics for a response.
-
-        Args:
-            generated: Model-generated response
-            reference: Reference answer (for ROUGE, text F1, exact match, order scoring)
-            expected_keywords: Keywords for coverage evaluation (optional)
-            is_mcq: Whether this is a multiple choice question
-
-        Returns:
-            Comprehensive dictionary of all metrics
+        (Note: FActScore needs context_text; use compute_factscore separately.)
         """
         metrics = {
             'response_length': len(generated),
             'word_count': len(generated.split())
         }
 
-        # All metrics that require reference
         if reference:
-            # ROUGE scores
             metrics['rouge'] = self.compute_rouge(generated, reference)
-
-            # Text F1 (always computed when reference is provided)
             metrics['text_f1'] = self.compute_text_f1(generated, reference)
-
-            # Order scoring (always computed when reference is provided)
             metrics['order'] = self.compute_order_score(generated, reference)
-
-            # Exact match (for MCQ only)
             if is_mcq:
                 metrics['exact_match'] = self.compute_exact_match(generated, reference)
 
-        # Keyword recall (if keywords provided)
         if expected_keywords:
             metrics['keyword_recall'] = self.compute_keyword_recall(generated, expected_keywords)
+
+        if context:
+            metrics['fact_score'] = self.compute_factscore(generated, context)
 
         return metrics
 
@@ -491,7 +593,8 @@ def evaluate_response(
     generated: str,
     reference: Optional[str] = None,
     expected_keywords: Optional[List[str]] = None,
-    is_mcq: bool = False
+    is_mcq: bool = False,
+    context: Optional[str] = None
 ) -> Dict[str, any]:
     """
     Quick function to evaluate a response with all metrics.
@@ -510,7 +613,8 @@ def evaluate_response(
         generated=generated,
         reference=reference,
         expected_keywords=expected_keywords,
-        is_mcq=is_mcq
+        is_mcq=is_mcq,
+        context=context
     )
 
 
@@ -559,6 +663,28 @@ if __name__ == "__main__":
     print(f"  Reference: {order_wrong['reference_order']}")
     print(f"  Generated: {order_wrong['generated_order']}")
     print(f"  Order Score: {order_wrong['order_score']} - {order_wrong['message']}")
+
+    # Test case 5: FActScore Testing
+    generated = """ D **Both substances contain particles held together by strong electrostatic forces of attraction.** In metals, there are strong electrostatic forces of attraction between the positive metal ions and the delocalized sea of electrons (metallic bonding). In ionic compounds, there are strong electrostatic forces of attraction between oppositely charged ions in the crystal lattice (ionic bonding). This statement is **correct** for both types of substances.
+    """
+    context = ["electrostatic forces of attraction", "metallic bonding", "ionic bonding", "delocalized electrons", "positive metal ions", "oppositely charged ions", "crystal lattice"]
+    fact_scores = metrics.compute_factscore(generated, context)
+    print(f"Generated: {generated}")
+    print(f"Reference: {context}")
+    print(f"FAct Scores for concise answer: {fact_scores}")
+
+    yap_generated = """
+    D Both substances contain particles held together by strong electrostatic forces of attraction.
+    Let's evaluate each statement:
+    A **Both substances are hard and rigid.** Ionic compounds are typically hard and rigid (brittle). While metals can be hard, they are also typically malleable and ductile, meaning they can be deformed without breaking, which contradicts being strictly 'rigid'. So, this statement is not universally correct for both.
+    B **Both substances are pure compounds.** The metallic structure shown represents an element (a pure metal) unless specified as an alloy. Ionic substances are compounds. Therefore, stating both are pure compounds is incorrect.
+    C **Both substances can conduct electricity in the solid state.** Metals conduct electricity in the solid state due to the mobility of delocalized electrons. However, ionic compounds do not conduct electricity in the solid state because their ions are fixed in the lattice and cannot move; they only conduct when molten or dissolved in solution. So, this statement is incorrect.
+    D **Both substances contain particles held together by strong electrostatic forces of attraction.** In metals, there are strong electrostatic forces of attraction between the positive metal ions and the delocalized sea of electrons (metallic bonding). In ionic compounds, there are strong electrostatic forces of attraction between oppositely charged ions in the crystal lattice (ionic bonding). This statement is **correct** for both types of substances.
+    """
+    yap_fact_scores = metrics.compute_factscore(yap_generated, context)
+    print(f"Generated: {yap_generated}")
+    print(f"Reference: {context}")
+    print(f"FAct Scores for extensive answer: {yap_fact_scores}")
 
     # Test case 5: All metrics
     print("\n=== TEST 5: All Metrics ===")

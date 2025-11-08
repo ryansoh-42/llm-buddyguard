@@ -12,8 +12,8 @@ import uvicorn
 # Initialize FastAPI app
 app = FastAPI(
     title="LLM Metrics API",
-    description="Evaluate model responses with ROUGE, Text F1, Exact Match, and Order Scoring",
-    version="1.0.0"
+    description="Evaluate model responses with ROUGE, Text F1, Exact Match, Order Scoring, and FActScore",
+    version="1.1.0"
 )
 
 # Initialize metrics service
@@ -25,7 +25,7 @@ class EvaluationRequest(BaseModel):
     """Request body for evaluation endpoint"""
     generated: str = Field(..., description="Model-generated response", min_length=1)
     reference: Optional[str] = Field(None, description="Reference/correct answer")
-    expected_keywords: Optional[List[str]] = Field(None, description="Expected keywords for coverage evaluation")
+    expected_keywords: Optional[List[str]] = Field(None, description="Expected keywords for coverage evaluation (also used as context for FActScore)")
     is_mcq: bool = Field(False, description="Whether this is a multiple choice question")
 
     class Config:
@@ -52,7 +52,7 @@ async def root():
     """Root endpoint with API information"""
     return {
         "name": "LLM Metrics API",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "description": "Evaluate model responses with multiple metrics",
         "endpoints": {
             "POST /evaluate": "Evaluate a response and get all metrics",
@@ -68,7 +68,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "metrics-api",
-        "version": "1.0.0"
+        "version": "1.1.0"
     }
 
 
@@ -98,9 +98,15 @@ async def metrics_info():
                 "output": "Boolean match, extracted answer, accuracy"
             },
             "order": {
-                "description": "Reasoning step order correctness (dynamic extraction, always computed)",
+                "description": "Reasoning step order correctness (dynamic extraction, always computed when reference provided)",
                 "requires": ["generated", "reference"],
                 "output": "Order score, concept sequences, edit distance"
+            },
+            "factscore": {
+                "description": "FActScore proxy: % of atomic facts (sentences) supported by knowledge/context",
+                "requires": ["generated", "expected_keywords (used as context)"],
+                "output": "factscore_score (0-1), factscore_supported, factscore_total_facts",
+                "notes": "Uses expected_keywords as the knowledge source. A sentence is supported if it hits ≥1 context phrase or meets lexical overlap threshold against longer passages."
             },
             "basic": {
                 "description": "Basic text statistics",
@@ -118,12 +124,13 @@ async def evaluate_response(request: EvaluationRequest):
 
     Returns all applicable metrics based on provided inputs:
     - Always: response_length, word_count
-    - If reference provided: rouge scores, text_f1, order score
-    - If expected_keywords provided: keyword_recall
-    - If is_mcq=true and reference provided: exact_match
+    - If reference provided: ROUGE scores, Text F1, Order score
+    - If expected_keywords provided: Keyword Recall
+    - If is_mcq=true and reference provided: Exact Match
+    - If expected_keywords provided: FActScore (using expected_keywords as context)
     """
     try:
-        # Compute all metrics
+        # Compute core metrics
         metrics = metrics_service.compute_all_metrics(
             generated=request.generated,
             reference=request.reference,
@@ -131,12 +138,23 @@ async def evaluate_response(request: EvaluationRequest):
             is_mcq=request.is_mcq
         )
 
+        # FActScore: reuse expected_keywords as context (when provided)
+        if request.expected_keywords:
+            fact = metrics_service.compute_factscore(
+                generated=request.generated,
+                context_text=request.expected_keywords,   # reuse keywords as context
+                overlap_threshold=0.35,
+                min_tokens_per_fact=5,
+                min_phrase_hits=1
+            )
+            metrics.update(fact)
+
         # Generate informative message about what was computed
         warnings = []
         if not request.reference:
             warnings.append("No reference provided - skipping ROUGE, Text F1, and Order metrics")
         if not request.expected_keywords:
-            warnings.append("No expected keywords provided - skipping Keyword Recall metric")
+            warnings.append("No expected keywords provided - skipping Keyword Recall and FActScore")
         if request.is_mcq and not request.reference:
             warnings.append("MCQ mode enabled but no reference provided - skipping Exact Match metric")
 
@@ -174,6 +192,17 @@ async def evaluate_batch(requests: List[EvaluationRequest]):
                     expected_keywords=request.expected_keywords,
                     is_mcq=request.is_mcq
                 )
+
+                # FActScore for batch items (if keywords provided)
+                if request.expected_keywords:
+                    fact = metrics_service.compute_factscore(
+                        generated=request.generated,
+                        context_text=request.expected_keywords,
+                        overlap_threshold=0.35,
+                        min_tokens_per_fact=5,
+                        min_phrase_hits=1
+                    )
+                    metrics.update(fact)
 
                 results.append({
                     "index": idx,
