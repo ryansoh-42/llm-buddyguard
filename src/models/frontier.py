@@ -60,7 +60,7 @@ class FrontierModel:
             Dictionary with 'response', 'confidence', and 'usage'
         """
         
-        valid_subjects = ["Mathematics", "Science", "English"]
+        valid_subjects = ["Mathematics", "Science", "English", "Physics", "Chemistry", "Biology"]
         if subject not in valid_subjects:
             raise ValueError(f"Subject must be one of {valid_subjects}, got: {subject}")
         

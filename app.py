@@ -1,10 +1,11 @@
 # app.py
 import streamlit as st
-from src.models.baseline import BaselineModel
+from typing import Dict, List
+import re
 from src.models.frontier import FrontierModel
+from src.models.finetuned import FineTunedModel
 from src.guardrails import EducationalGuardrails
 from src.evaluation import ModelEvaluator
-import os
 
 # Page config
 st.set_page_config(
@@ -12,101 +13,150 @@ st.set_page_config(
     layout="wide"
 )
 
+
+def render_guardrail_notifications(
+    guardrail_message: str | None,
+    violations: List[Dict] | None,
+    detected_content: str | None
+) -> None:
+    """Display guardrail warnings and detailed violations inline in the chat."""
+
+    if guardrail_message and guardrail_message not in ("Prompt approved", "Safety mode disabled"):
+        st.warning(guardrail_message)
+
+    if not violations:
+        return
+
+    severity_to_display = {
+        "high": st.error,
+        "medium": st.warning,
+        "low": st.info
+    }
+
+    for idx, violation in enumerate(violations, 1):
+        severity = violation.get("severity", "medium").lower()
+        display_fn = severity_to_display.get(severity, st.warning)
+        category = violation.get("category", "unknown").replace("_", " ").title()
+        reason = violation.get("reason", "No reason provided")
+        display_fn(f"Violation {idx}: [{severity.upper()}] {category} — {reason}")
+
+        details = violation.get("details")
+        if details:
+            st.markdown(f"*{details}*")
+
+    if detected_content:
+        st.markdown("**Detected Content:**")
+        st.code(detected_content, language="text")
+
+    tips = {
+        "toxic": "Please use respectful language when asking questions. Focus on the educational content.",
+        "pii": "Personal information like emails, phone numbers, or addresses is not needed for educational questions.",
+        "profanity": "Please rephrase your question using appropriate academic language.",
+        "off_topic": "This tutor specializes in Physics, Chemistry, and Biology. Please ask questions related to these subjects."
+    }
+
+    primary_category = violations[0].get("category") if violations else None
+    if primary_category in tips:
+        st.info(f"**Tip:** {tips[primary_category]}")
+
+
+def sanitize_response(text: str, violations: List[Dict] | None) -> str:
+    """Redact sensitive details from model responses when violations are detected."""
+    if not violations:
+        return text
+
+    sanitized_text = text
+    categories = {violation.get("category") for violation in violations}
+
+    if "pii" in categories:
+        # Mask sequences that resemble credit card numbers or other long digit strings
+        sanitized_text = re.sub(r"(?:(?<!\d)(?:\d[ -]?){12,19}(?!\d))", "[REDACTED NUMBER]", sanitized_text)
+        # Mask email-like patterns
+        sanitized_text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "[REDACTED EMAIL]", sanitized_text)
+
+    return sanitized_text
+
 # Initialize components
 @st.cache_resource
-def load_models():
-    """Load models with caching"""
-    
-    # Subject-specific model mapping
-    subject_models = {}
-    
-    # Comment out Physics model for now to save memory and test Chemistry
-    # try:
-    #     physics_model = BaselineModel(model_name="Fawl/is469_project_physics")
-    #     subject_models["Physics"] = physics_model
-    #     print("✅ Physics model (local) ready")
-    # except Exception as e:
-    #     print(f"❌ Physics model failed: {e}")
-    #     subject_models["Physics"] = None
-    subject_models["Physics"] = None
-    print("ℹ️ Physics model disabled for testing")
-
-    # Load only Chemistry model for testing
-    try:
-        chemistry_model = BaselineModel(model_name="Fawl/is469_project_chem")
-        subject_models["Chemistry"] = chemistry_model
-        print("✅ Chemistry model (local) ready")
-    except Exception as e:
-        print(f"❌ Chemistry model failed: {e}")
-        subject_models["Chemistry"] = None
-
-    # try:
-    #     biology_model = BaselineModel(model_name="Fawl/is469_project_bio")
-    #     subject_models["Biology"] = biology_model
-    #     print("✅ Biology model (local) ready")
-    # except Exception as e:
-    #     print(f"❌ Biology model failed: {e}")
-    #     subject_models["Biology"] = None
-    subject_models["Biology"] = None
-    print("ℹ️ Biology model disabled for testing")
-
-    # Skip baseline model to save memory - only using fine-tuned subject models
-    # Uncomment below if you need a general baseline model later:
-    # try:
-    #     baseline = BaselineModel(model_name="meta-llama/Llama-3.2-1B-Instruct")
-    #     baseline_loaded = True
-    #     print("✅ General baseline model ready")
-    # except Exception as e:
-    #     st.warning(f"Baseline model not loaded: {e}")
-    #     baseline = None
-    #     baseline_loaded = False
-    
-    baseline = None
-    baseline_loaded = False
-    print("ℹ️ Baseline model commented out to conserve memory")
-    
+def load_frontier_model():
+    """Load frontier model with caching - only when needed"""
     try:
         frontier = FrontierModel()
-        frontier_loaded = True
+        return frontier, True
     except Exception as e:
         st.warning(f"Frontier model not loaded: {e}")
-        frontier = None
-        frontier_loaded = False
-    
-    # Check which subject models are available
-    available_subjects = [subj for subj, model in subject_models.items() if model is not None]
-    subject_loaded = len(available_subjects) > 0
-    
-    return baseline, frontier, subject_models, baseline_loaded, frontier_loaded, subject_loaded, available_subjects
+        return None, False
 
-baseline_model, frontier_model, subject_models, baseline_ok, frontier_ok, subject_ok, available_subjects = load_models()
+@st.cache_resource
+def load_finetuned_model(subject):
+    """Load fine-tuned model for specific subject with caching"""
+    try:
+        # Map UI subject names to model subject names
+        subject_map = {
+            "Physics": "physics",
+            "Chemistry": "chemistry",
+            "Biology": "biology"
+        }
+        model_subject = subject_map.get(subject, "physics")
+        model = FineTunedModel(subject=model_subject)
+        return model, True
+    except Exception as e:
+        st.warning(f"Fine-tuned {subject} model not loaded: {e}")
+        return None, False
 guardrails = EducationalGuardrails()
 evaluator = ModelEvaluator()
 
 # Sidebar
 st.sidebar.title("Settings")
 
-# Show available subjects and model types
-st.sidebar.markdown("### Available Models")
-for subj in ["Physics", "Chemistry", "Biology"]:
-    if subj in available_subjects and subject_models.get(subj) != baseline_model:
-        st.sidebar.success(f"✅ {subj}: Fine-tuned model")
-    elif subj in available_subjects:
-        st.sidebar.info(f"ℹ️ {subj}: Base model")
-    else:
-        st.sidebar.error(f"❌ {subj}: Not available")
-
-model_choice = st.sidebar.radio(
-    "Choose Model Type:",
-    ["Subject-Specific (Recommended)", "General Baseline", "Frontier (GPT-4o)", "Compare Models"],
-    disabled=not (baseline_ok or frontier_ok or subject_ok)
-)
-
 subject = st.sidebar.selectbox(
     "Subject:",
-    ["Physics", "Chemistry", "Biology"],
-    help="Select your subject. All subjects have fine-tuned models available."
+    ["Physics", "Chemistry", "Biology"]
 )
+
+# Set default model choice to Fine-tuned (Subject-specific)
+if "model_choice" not in st.session_state:
+    st.session_state.model_choice = "Fine-tuned (Subject-specific)"
+
+# Get index for current selection
+model_options = ["Fine-tuned (Subject-specific)", "Frontier (GPT-4o)", "Compare Both"]
+current_index = model_options.index(st.session_state.model_choice) if st.session_state.model_choice in model_options else 0
+
+model_choice = st.sidebar.radio(
+    "Choose Model:",
+    model_options,
+    index=current_index
+)
+
+# Update session state
+st.session_state.model_choice = model_choice
+
+# Load models only when needed
+frontier_model = None
+frontier_ok = False
+finetuned_model = None
+finetuned_ok = False
+
+# Load fine-tuned model if it's the default or selected
+if model_choice in ["Fine-tuned (Subject-specific)", "Compare Both"]:
+    finetuned_model, finetuned_ok = load_finetuned_model(subject)
+
+# Load frontier model only if selected
+if model_choice in ["Frontier (GPT-4o)", "Compare Both"]:
+    frontier_model, frontier_ok = load_frontier_model()
+
+# Safety guardrails toggle
+if "safety_mode_enabled" not in st.session_state:
+    st.session_state.safety_mode_enabled = True
+
+enable_safety_mode = st.sidebar.checkbox(
+    "Enable Safety Guardrails",
+    value=st.session_state.safety_mode_enabled,
+    help="Toggle safety checks for toxic language, PII, profanity, and topic restrictions"
+)
+
+# Update session state when toggle changes
+st.session_state.safety_mode_enabled = enable_safety_mode
 
 show_metrics = st.sidebar.checkbox("Show Evaluation Metrics", value=False)
 
@@ -115,17 +165,18 @@ st.title("LLM BuddyGuard - O-Level Tutor")
 st.markdown("Your AI study companion for Singapore O-Level examinations")
 
 # Model status
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 with col1:
-    subject_model_status = "Ready" if subject in available_subjects else "Not Available"
-    model_type = "Fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and 
-                                  subject_models.get(subject) != baseline_model) else "Base"
-    st.metric(f"{subject} Model", subject_model_status, delta=model_type)
+    if model_choice in ["Fine-tuned (Subject-specific)", "Compare Both"]:
+        status = "Ready" if finetuned_ok else "Not Loaded"
+    else:
+        status = "Not Selected"
+    st.metric(f"Fine-tuned {subject} Model", status)
 with col2:
-    status = "Ready" if baseline_ok else "Not Loaded"
-    st.metric("General Baseline", status)
-with col3:
-    status = "Ready" if frontier_ok else "Not Loaded"
+    if model_choice in ["Frontier (GPT-4o)", "Compare Both"]:
+        status = "Ready" if frontier_ok else "Not Loaded"
+    else:
+        status = "Not Selected"
     st.metric("Frontier Model", status)
 
 st.divider()
@@ -138,82 +189,157 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        render_guardrail_notifications(
+            message.get("guardrail_message"),
+            message.get("violations"),
+            message.get("detected_content")
+        )
         if "metrics" in message and show_metrics:
             with st.expander("Evaluation Metrics"):
                 st.json(message["metrics"])
 
 # Chat input
 if prompt := st.chat_input("Ask your O-Level question..."):
-    # Apply guardrails
-    guardrail_result = guardrails.apply_guardrails(prompt)
-    
-    if not guardrail_result["allowed"]:
-        st.error(guardrail_result["message"])
+    if enable_safety_mode:
+        guardrail_result = guardrails.apply_guardrails(prompt)
     else:
-        # Display user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Show warning if answer-seeking detected
-        if guardrail_result["message"] != "Prompt approved":
-            st.warning(guardrail_result["message"])
-        
+        guardrail_result = {
+            "allowed": True,
+            "message": "Safety mode disabled",
+            "category": "safety_disabled"
+        }
+        st.warning("Safety guardrails are currently disabled. Proceed with caution.")
+
+    guardrail_message = guardrail_result.get("message") if guardrail_result else None
+    guardrail_category = guardrail_result.get("category") if guardrail_result else None
+    guardrail_violations = guardrail_result.get("violations") if guardrail_result else None
+    detected_content = guardrail_result.get("detected_content") if guardrail_result else None
+
+    user_message: Dict = {"role": "user", "content": prompt}
+
+    if guardrail_category != "safety_disabled":
+        if guardrail_message and guardrail_message != "Prompt approved":
+            user_message["guardrail_message"] = guardrail_message
+        if guardrail_violations:
+            user_message["violations"] = guardrail_violations
+        if detected_content:
+            user_message["detected_content"] = detected_content
+
+    st.session_state.messages.append(user_message)
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+        render_guardrail_notifications(
+            user_message.get("guardrail_message"),
+            user_message.get("violations"),
+            user_message.get("detected_content")
+        )
+
+    prompt_allowed = guardrail_result.get("allowed", True)
+
+    if prompt_allowed:
         # Generate response
         with st.chat_message("assistant"):
-            
-            # Helper function to get the appropriate model for the subject
-            def get_subject_model():
-                if subject in subject_models and subject_models[subject] is not None:
-                    return subject_models[subject]
-                elif baseline_ok:
-                    return baseline_model
-                else:
-                    return None
-            
-            if model_choice == "Subject-Specific (Recommended)":
-                # Use subject-specific model (fine-tuned if available, baseline if not)
-                model_to_use = get_subject_model()
-                if model_to_use:
-                    model_type = "fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and 
-                                                subject_models.get(subject) != baseline_model) else "base"
-                    
-                    with st.spinner(f"Using {model_type} model for {subject}..."):
-                        result = model_to_use.generate(prompt, subject=subject, max_new_tokens=128, temperature=0.3)
-                        st.markdown(result["response"])
+            if model_choice == "Compare Both":
+                if finetuned_ok and frontier_ok:
+                    col1, col2 = st.columns(2)
+
+                    finetuned_display_text: str | None = None
+                    finetuned_guardrail_info: Dict = {}
+                    finetuned_metrics: Dict | None = None
+                    with col1:
+                        st.markdown(f"**Fine-tuned {subject} Model**")
+                        with st.spinner("Generating..."):
+                            finetuned_result = finetuned_model.generate(prompt)
+                            response_text = finetuned_result["response"]
+
+                            display_text = response_text
+
+                            if enable_safety_mode:
+                                validation_result = guardrails.validate_response(response_text)
+                                if not validation_result["is_safe"]:
+                                    st.warning("⚠️ Guardrails detected issues with this response. Sensitive details may be redacted.")
+                                    render_guardrail_notifications(
+                                        validation_result.get("message"),
+                                        validation_result.get("violations"),
+                                        validation_result.get("detected_content")
+                                    )
+                                    display_text = sanitize_response(response_text, validation_result.get("violations"))
+                                    finetuned_guardrail_info["guardrail_message"] = validation_result.get("message")
+                                    if validation_result.get("violations"):
+                                        finetuned_guardrail_info["violations"] = validation_result["violations"]
+                                    if validation_result.get("detected_content"):
+                                        finetuned_guardrail_info["detected_content"] = validation_result["detected_content"]
+
+                            st.markdown(display_text)
+                            finetuned_display_text = display_text
+                            
+                            if show_metrics:
+                                finetuned_metrics = evaluator.evaluate_response(display_text)
+                                with st.expander("Metrics"):
+                                    st.json(finetuned_metrics)
+
+                    frontier_display_text: str | None = None
+                    frontier_guardrail_info: Dict = {}
+                    frontier_metrics: Dict | None = None
+                    with col2:
+                        st.markdown("**Frontier Model (GPT-4o)**")
+                        response_placeholder = st.empty()
+                        full_response = ""
+                        
+                        for token in frontier_model.stream_generate(prompt, subject=subject):
+                            full_response += token
+                            response_placeholder.markdown(full_response)
+                        
+                        display_text = full_response
+
+                        if enable_safety_mode:
+                            validation_result = guardrails.validate_response(full_response)
+                            if not validation_result["is_safe"]:
+                                st.warning("⚠️ Guardrails detected issues with this response. Sensitive details may be redacted.")
+                                render_guardrail_notifications(
+                                    validation_result.get("message"),
+                                    validation_result.get("violations"),
+                                    validation_result.get("detected_content")
+                                )
+                                display_text = sanitize_response(full_response, validation_result.get("violations"))
+                                frontier_guardrail_info["guardrail_message"] = validation_result.get("message")
+                                if validation_result.get("violations"):
+                                    frontier_guardrail_info["violations"] = validation_result["violations"]
+                                if validation_result.get("detected_content"):
+                                    frontier_guardrail_info["detected_content"] = validation_result["detected_content"]
+
+                        response_placeholder.markdown(display_text)
+                        frontier_display_text = display_text
                         
                         if show_metrics:
-                            metrics = evaluator.evaluate_response(result["response"])
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": result["response"],
-                                "metrics": metrics
-                            })
-                        else:
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": result["response"]
-                            })
+                            frontier_metrics = evaluator.evaluate_response(display_text)
+                            with st.expander("Metrics"):
+                                st.json(frontier_metrics)
+
+                    if finetuned_display_text is not None:
+                        assistant_message: Dict = {
+                            "role": "assistant",
+                            "content": f"**Fine-tuned {subject} Model**\n\n{finetuned_display_text}"
+                        }
+                        if finetuned_guardrail_info:
+                            assistant_message.update(finetuned_guardrail_info)
+                        if show_metrics and finetuned_metrics is not None:
+                            assistant_message["metrics"] = finetuned_metrics
+                        st.session_state.messages.append(assistant_message)
+
+                    if frontier_display_text is not None:
+                        assistant_message: Dict = {
+                            "role": "assistant",
+                            "content": "**Frontier Model (GPT-4o)**\n\n" + frontier_display_text
+                        }
+                        if frontier_guardrail_info:
+                            assistant_message.update(frontier_guardrail_info)
+                        if show_metrics and frontier_metrics is not None:
+                            assistant_message["metrics"] = frontier_metrics
+                        st.session_state.messages.append(assistant_message)
                 else:
-                    st.error(f"No model available for {subject}")
-            
-            elif model_choice == "General Baseline" and baseline_ok:
-                with st.spinner("Using general baseline model..."):
-                    result = baseline_model.generate(prompt, subject=subject, max_new_tokens=256, temperature=0.7)
-                    st.markdown(result["response"])
-                    
-                    if show_metrics:
-                        metrics = evaluator.evaluate_response(result["response"])
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": result["response"],
-                            "metrics": metrics
-                        })
-                    else:
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": result["response"]
-                        })
+                    st.error("Both models must be loaded for comparison mode")
                         
             elif model_choice == "Frontier (GPT-4o)" and frontier_ok:
                 response_placeholder = st.empty()
@@ -223,70 +349,81 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                     full_response += token
                     response_placeholder.markdown(full_response)
                 
+                display_text = full_response
+                assistant_guardrail_info: Dict = {}
+
+                if enable_safety_mode:
+                    validation_result = guardrails.validate_response(full_response)
+                    if not validation_result["is_safe"]:
+                        st.warning("⚠️ Guardrails detected issues with this response. Sensitive details may be redacted.")
+                        render_guardrail_notifications(
+                            validation_result.get("message"),
+                            validation_result.get("violations"),
+                            validation_result.get("detected_content")
+                        )
+                        display_text = sanitize_response(full_response, validation_result.get("violations"))
+                        assistant_guardrail_info["guardrail_message"] = validation_result.get("message")
+                        if validation_result.get("violations"):
+                            assistant_guardrail_info["violations"] = validation_result["violations"]
+                        if validation_result.get("detected_content"):
+                            assistant_guardrail_info["detected_content"] = validation_result["detected_content"]
+
+                response_placeholder.markdown(display_text)
+
+                assistant_message: Dict = {
+                    "role": "assistant",
+                    "content": display_text
+                }
+
+                if assistant_guardrail_info:
+                    assistant_message.update(assistant_guardrail_info)
+
                 if show_metrics:
-                    metrics = evaluator.evaluate_response(full_response)
+                    metrics = evaluator.evaluate_response(display_text)
                     with st.expander("Evaluation Metrics"):
                         st.json(metrics)
-                    st.session_state.messages.append({
+                    assistant_message["metrics"] = metrics
+
+                st.session_state.messages.append(assistant_message)
+            elif model_choice == "Fine-tuned (Subject-specific)" and finetuned_ok:
+                with st.spinner("Thinking..."):
+                    result = finetuned_model.generate(prompt)
+                    response_text = result["response"]
+
+                    display_text = response_text
+                    assistant_guardrail_info: Dict = {}
+
+                    if enable_safety_mode:
+                        validation_result = guardrails.validate_response(response_text)
+                        if not validation_result["is_safe"]:
+                            st.warning("⚠️ Guardrails detected issues with this response. Sensitive details may be redacted.")
+                            render_guardrail_notifications(
+                                validation_result.get("message"),
+                                validation_result.get("violations"),
+                                validation_result.get("detected_content")
+                            )
+                            display_text = sanitize_response(response_text, validation_result.get("violations"))
+                            assistant_guardrail_info["guardrail_message"] = validation_result.get("message")
+                            if validation_result.get("violations"):
+                                assistant_guardrail_info["violations"] = validation_result["violations"]
+                            if validation_result.get("detected_content"):
+                                assistant_guardrail_info["detected_content"] = validation_result["detected_content"]
+
+                    st.markdown(display_text)
+
+                    assistant_message: Dict = {
                         "role": "assistant",
-                        "content": full_response,
-                        "metrics": metrics
-                    })
-                else:
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": full_response
-                    })
-                    
-            elif model_choice == "Compare Models":
-                # Compare subject-specific vs frontier
-                subject_model_to_use = get_subject_model()
-                
-                if subject_model_to_use and frontier_ok:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        model_type = "Fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and 
-                                                    subject_models.get(subject) != baseline_model) else "Base"
-                        st.markdown(f"**{model_type} {subject} Model**")
-                        with st.spinner("Generating..."):
-                            subject_result = subject_model_to_use.generate(prompt, subject=subject)
-                            st.markdown(subject_result["response"])
-                            
-                            if show_metrics:
-                                metrics = evaluator.evaluate_response(subject_result["response"])
-                                with st.expander("Metrics"):
-                                    st.json(metrics)
-                    
-                    with col2:
-                        st.markdown("**Frontier Model (GPT-4o)**")
-                        with st.spinner("Generating..."):
-                            frontier_result = frontier_model.generate(prompt, subject=subject)
-                            st.markdown(frontier_result["response"])
-                            
-                            if show_metrics:
-                                metrics = evaluator.evaluate_response(frontier_result["response"])
-                                with st.expander("Metrics"):
-                                    st.json(metrics)
-                elif subject_model_to_use and baseline_ok:
-                    # Compare subject-specific vs general baseline
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        model_type = "Fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and 
-                                                    subject_models.get(subject) != baseline_model) else "Subject-Optimized"
-                        st.markdown(f"**{model_type} Model**")
-                        with st.spinner("Generating..."):
-                            subject_result = subject_model_to_use.generate(prompt, subject=subject)
-                            st.markdown(subject_result["response"])
-                    
-                    with col2:
-                        st.markdown("**General Baseline Model**")
-                        with st.spinner("Generating..."):
-                            baseline_result = baseline_model.generate(prompt, subject=subject)
-                            st.markdown(baseline_result["response"])
-                else:
-                    st.error("Not enough models loaded for comparison")
+                        "content": display_text
+                    }
+
+                    if assistant_guardrail_info:
+                        assistant_message.update(assistant_guardrail_info)
+
+                    if show_metrics:
+                        metrics = evaluator.evaluate_response(display_text)
+                        assistant_message["metrics"] = metrics
+
+                    st.session_state.messages.append(assistant_message)
             else:
                 st.error("Selected model is not available")
 
@@ -294,16 +431,14 @@ if prompt := st.chat_input("Ask your O-Level question..."):
 st.sidebar.divider()
 st.sidebar.markdown("""
 ### How to Use
-1. **Choose your subject** (Physics, Chemistry, Biology, etc.)
-2. **Select model type**:
-   - **Subject-Specific**: Fine-tuned models for Physics/Chemistry/Biology
-   - **General Baseline**: General purpose model
-   - **Frontier**: GPT-4o for comparison
-3. **Ask your O-Level question**
-4. **Get step-by-step guidance!**
-
-### Model Info
-- **🔬 Physics/Chemistry/Biology**: Fine-tuned on Singapore O-Level content
+1. Choose your subject (Physics, Chemistry, or Biology)
+2. Select a model (Fine-tuned or Frontier)
+3. Ask your O-Level question
+4. Get step-by-step guidance!
 
 **Remember:** This tutor guides you through problems rather than giving direct answers.
+
+**Fine-tuned Models:** Subject-specific models fine-tuned for Physics, Chemistry, and Biology.
+
+**Compare Mode:** Compare responses from the fine-tuned model and GPT-4o side-by-side.
 """)
