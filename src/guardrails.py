@@ -6,6 +6,7 @@ from guardrails.hub import (
     DetectPII,
     ProfanityFree,
     RestrictToTopic,
+    BanList,
 )
 import logging
 import re
@@ -18,7 +19,6 @@ class EducationalGuardrails:
     Comprehensive safety and educational guardrails using Guardrails AI library.
     Uses pre-built validators from Guardrails Hub for dynamic detection.
     """
-    
     def __init__(self, strict_mode: bool = True):
         """
         Initialize guardrails system with Guardrails AI validators.
@@ -39,6 +39,14 @@ class EducationalGuardrails:
             "molecules", "atoms", "cells", "organisms", "ecosystems",
             "force", "energy", "motion", "reaction", "compound", "element",
             "photosynthesis", "respiration", "genetics", "evolution"
+        ]
+
+        # High-risk phrases to block explicitly (terrorism, violence, etc.)
+        self.banned_phrases = [
+            "hijack", "bomb", "explosive", "gun", "terrorist", "terrorism",
+            "crash a building", "weapon of mass destruction", "massacre",
+            "school shooting", "shoot up", "detonate", "suicide attack",
+            "make a bomb", "kill people", "destroy building"
         ]
         
         # Create input guard for user prompts
@@ -63,6 +71,11 @@ class EducationalGuardrails:
             RestrictToTopic(
                 valid_topics=allowed_topics,
                 on_fail=OnFailAction.EXCEPTION
+            ),
+            # Explicit ban list for violent / criminal content
+            BanList(
+                banned_words=self.banned_phrases,
+                on_fail=OnFailAction.EXCEPTION
             )
         )
         
@@ -75,12 +88,16 @@ class EducationalGuardrails:
             ),
             DetectPII(
                 pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
-                             "SSN", "IP_ADDRESS", "DATE_TIME", "LOCATION"],
+                             "SSN", "IP_ADDRESS"],
                 on_fail=OnFailAction.EXCEPTION
             ),
             ProfanityFree(
                 on_fail=OnFailAction.EXCEPTION
-            )
+            ),
+            BanList(
+                banned_words=self.banned_phrases,
+                on_fail=OnFailAction.EXCEPTION
+            ),
         )
         
         # Educational-specific patterns for answer-seeking detection

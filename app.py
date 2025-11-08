@@ -43,6 +43,37 @@ def load_finetuned_model(subject):
 guardrails = EducationalGuardrails()
 evaluator = ModelEvaluator()
 
+def format_guardrail_violation_message(guardrail_result: dict) -> str:
+    """Create a chat-friendly summary of guardrail violations."""
+    lines = [":warning: **Safety Guardrail Triggered**"]
+    
+    message = guardrail_result.get("message")
+    if message:
+        lines.append(message)
+    
+    violations = guardrail_result.get("violations") or []
+    if violations:
+        lines.append("")
+        lines.append("**Violations:**")
+        for idx, violation in enumerate(violations, 1):
+            category = violation.get("category", "unknown").replace("_", " ").title()
+            severity = violation.get("severity", "unknown").upper()
+            reason = violation.get("reason", "No reason provided")
+            details = violation.get("details", "")
+            
+            lines.append(f"{idx}. **{category}** — `{severity}`")
+            lines.append(f"   - {reason}")
+            if details:
+                lines.append(f"   - _{details}_")
+        lines.append("")
+    
+    detected_content = guardrail_result.get("detected_content")
+    if detected_content:
+        lines.append("**Detected Content:**")
+        lines.append(f"`{detected_content}`")
+    
+    return "\n".join(lines).strip()
+
 # Sidebar
 st.sidebar.title("Settings")
 
@@ -132,6 +163,11 @@ for message in st.session_state.messages:
 
 # Chat input
 if prompt := st.chat_input("Ask your O-Level question..."):
+    # Display user message immediately
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
     # Apply guardrails only if safety mode is enabled
     if enable_safety_mode:
         guardrail_result = guardrails.apply_guardrails(prompt)
@@ -187,6 +223,19 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                     if guardrail_result.get("detected_content"):
                         st.markdown("**Detected Content:**")
                         st.code(guardrail_result["detected_content"], language="text")
+
+            violation_summary = format_guardrail_violation_message(guardrail_result)
+            with st.chat_message("assistant"):
+                st.markdown(violation_summary)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": violation_summary,
+                "message_type": "guardrail_violation",
+                "violations": guardrail_result.get("violations", []),
+                "guardrail_category": guardrail_result.get("category"),
+                "detected_content": guardrail_result.get("detected_content")
+            })
         else:
             # Safety mode enabled and prompt approved, continue to model generation
             pass
@@ -201,10 +250,6 @@ if prompt := st.chat_input("Ask your O-Level question..."):
     
     # Continue with model generation if allowed
     if guardrail_result.get("allowed", True):
-        # Display user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
         
         # Show warning if answer-seeking detected
         if guardrail_result["message"] != "Prompt approved":

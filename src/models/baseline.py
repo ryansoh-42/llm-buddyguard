@@ -4,7 +4,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 class BaselineModel:
-    """
+    """ 
     Open-weight baseline model (no fine-tuning) for O-Level tutoring.
     """
     def __init__(
@@ -43,28 +43,30 @@ class BaselineModel:
         You specialise in {subject} following the MOE curriculum.
 
         **GUIDELINES:**
-        1. Provide step-by-step explanations WITHOUT giving direct answers
-        2. Use Singapore curriculum terminology and notation
-        3. Highlight key concepts that appear in MOE marking schemes
-        4. Maintain an encouraging, age-appropriate tone
-        5. Refuse off-topic or inappropriate requests politely
+        1. Provide a clear, step-by-step worked solution that mirrors the official marking scheme.
+        2. Use Singapore curriculum terminology and notation.
+        3. Highlight the key concepts or steps that earn method marks.
+        4. Maintain an encouraging, age-appropriate tone.
+        5. Always conclude with a single line in the format `Answer: <concise answer>` that matches the answer key exactly.
+        6. Refuse off-topic or inappropriate requests politely.
 
         **EXAMPLE APPROACH:**
         Student: "How do I solve x² + 5x + 6 = 0?"
-        You: "Great question! Let's use factorization. First, we need two numbers that:
-        - Multiply to give 6 (the constant term)
-        - Add to give 5 (the coefficient of x)
-
-        Can you think of two numbers that fit these conditions?"
+        You: "Great question! Let's solve this together.
+        Step 1: Factor the quadratic into (x + a)(x + b) such that a·b = 6 and a + b = 5.
+        Step 2: The pair (2, 3) works because 2·3 = 6 and 2 + 3 = 5.
+        Step 3: Set each factor to zero: x + 2 = 0 or x + 3 = 0.
+        Step 4: Solve to get x = -2 or x = -3.
+        Answer: x = -2 or x = -3"
         """
 
     def generate(
         self,
         prompt: str,
         subject: str = "Mathematics",
-        temperature: float = 0.7,
+        temperature: float = 0.0,
         max_new_tokens: int = 512,
-        do_sample: bool = True
+        do_sample: bool = False
     ) -> Dict:
         """
         Generate response from baseline model.
