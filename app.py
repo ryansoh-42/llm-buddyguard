@@ -21,15 +21,15 @@ def load_models():
     subject_models = {}
     
     # Comment out Physics model for now to save memory and test Chemistry
-    # try:
-    #     physics_model = BaselineModel(model_name="Fawl/is469_project_physics")
-    #     subject_models["Physics"] = physics_model
-    #     print("✅ Physics model (local) ready")
-    # except Exception as e:
-    #     print(f"❌ Physics model failed: {e}")
-    #     subject_models["Physics"] = None
-    subject_models["Physics"] = None
-    print("ℹ️ Physics model disabled for testing")
+    try:
+        physics_model = BaselineModel(model_name="Fawl/is469_project_physics")
+        subject_models["Physics"] = physics_model
+        print("✅ Physics model (local) ready")
+    except Exception as e:
+        print(f"❌ Physics model failed: {e}")
+        subject_models["Physics"] = None
+    # subject_models["Physics"] = None
+    # print("ℹ️ Physics model disabled for testing")
 
     # Load only Chemistry model for testing
     try:
@@ -40,15 +40,15 @@ def load_models():
         print(f"❌ Chemistry model failed: {e}")
         subject_models["Chemistry"] = None
 
-    # try:
-    #     biology_model = BaselineModel(model_name="Fawl/is469_project_bio")
-    #     subject_models["Biology"] = biology_model
-    #     print("✅ Biology model (local) ready")
-    # except Exception as e:
-    #     print(f"❌ Biology model failed: {e}")
-    #     subject_models["Biology"] = None
-    subject_models["Biology"] = None
-    print("ℹ️ Biology model disabled for testing")
+    try:
+        biology_model = BaselineModel(model_name="Fawl/is469_project_bio")
+        subject_models["Biology"] = biology_model
+        print("✅ Biology model (local) ready")
+    except Exception as e:
+        print(f"❌ Biology model failed: {e}")
+        subject_models["Biology"] = None
+    # subject_models["Biology"] = None
+    # print("ℹ️ Biology model disabled for testing")
 
     # Skip baseline model to save memory - only using fine-tuned subject models
     # Uncomment below if you need a general baseline model later:
@@ -179,7 +179,7 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                                                 subject_models.get(subject) != baseline_model) else "base"
                     
                     with st.spinner(f"Using {model_type} model for {subject}..."):
-                        result = model_to_use.generate(prompt, subject=subject, max_new_tokens=128, temperature=0.3)
+                        result = model_to_use.generate(prompt, subject=subject, max_new_tokens=1280, temperature=0.3)
                         st.markdown(result["response"])
                         
                         if show_metrics:

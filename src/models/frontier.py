@@ -7,6 +7,9 @@ from typing import List, Dict, Optional
 from openai import OpenAI
 
 
+from openai import AzureOpenAI, OpenAI
+
+
 class FrontierModel:
     """
     Wrapper for GPT-4o API with O-level tutoring capabilities.
@@ -20,11 +23,20 @@ class FrontierModel:
         """
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
-        
-        self.client = OpenAI(api_key=api_key)
-        self.model_name = model_name
+            # Read secrets
+            azure_openai_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+            azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
 
+            self.client = AzureOpenAI(
+                api_key=azure_openai_api_key,
+                api_version="2024-06-01",
+                azure_endpoint=azure_openai_endpoint
+            )
+            # raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
+        else:
+            self.client = OpenAI(api_key=api_key)
+        self.model_name = model_name
+        
     def _get_system_prompt(self, subject: str) -> str:
         """
         Generate system prompt for Singapore O-Level tutoring.
