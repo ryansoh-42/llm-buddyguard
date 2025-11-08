@@ -10,9 +10,10 @@ except ImportError:
     print("ℹ️ AutoModelForInference not available, using AutoModelForCausalLM")
 import torch
 
-class BaselineModel:
+class FineTunedModel:
     """
-    Open-weight baseline model (no fine-tuning) for O-Level tutoring.
+    Fine-tuned subject-specific model for O-Level tutoring.
+    Loads HuggingFace fine-tuned models with subject-specific prompts.
     """
     def __init__(
         self, 
@@ -240,13 +241,13 @@ Can you think of two numbers that fit these conditions?"
 
 
 if __name__ == "__main__":
-    # Test baseline model
-    model = BaselineModel(model_name="meta-llama/Llama-3.2-3B-Instruct")
-    
+    # Test fine-tuned model
+    model = FineTunedModel(model_name="meta-llama/Llama-3.2-3B-Instruct")
+
     result = model.generate(
         prompt="How do I find the area of a circle?",
-        subject="Mathematics"
+        subject="Mathematics",
     )
-    
+
     print(f"Response: {result['response']}")
     print(f"Metadata: {result['metadata']}")

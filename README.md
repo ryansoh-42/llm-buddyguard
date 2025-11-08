@@ -89,7 +89,7 @@ In `app.py`, you can configure which models to load:
 ```python
 # To enable Physics model:
 try:
-    physics_model = BaselineModel(model_name="Fawl/is469_project_physics")
+    physics_model = FineTunedModel(model_name="Fawl/is469_project_physics")
     subject_models["Physics"] = physics_model
     print("✅ Physics model (local) ready")
 except Exception as e:
@@ -137,7 +137,7 @@ Edit `app.py` to uncomment/comment specific subjects:
 ```python
 # Enable Chemistry model (uncomment):
 try:
-    chemistry_model = BaselineModel(model_name="Fawl/is469_project_chem")
+    chemistry_model = FineTunedModel(model_name="Fawl/is469_project_chem")
     subject_models["Chemistry"] = chemistry_model
     print("✅ Chemistry model (local) ready")
 except Exception as e:
@@ -146,7 +146,7 @@ except Exception as e:
 
 # Disable Chemistry model (comment out and set to None):
 # try:
-#     chemistry_model = BaselineModel(model_name="Fawl/is469_project_chem") 
+#     chemistry_model = FineTunedModel(model_name="Fawl/is469_project_chem") 
 #     subject_models["Chemistry"] = chemistry_model
 #     print("✅ Chemistry model (local) ready")
 # except Exception as e:
