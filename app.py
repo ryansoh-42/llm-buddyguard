@@ -1,6 +1,6 @@
 # app.py
 import streamlit as st
-from src.models.baseline import BaselineModel
+from src.models.finetune import FineTunedModel
 from src.models.frontier import FrontierModel
 from src.guardrails import EducationalGuardrails
 from src.evaluation import ModelEvaluator
@@ -22,7 +22,7 @@ def load_models():
     
     # Comment out Physics model for now to save memory and test Chemistry
     # try:
-    #     physics_model = BaselineModel(model_name="Fawl/is469_project_physics")
+    #     physics_model = FineTunedModel(model_name="Fawl/is469_project_physics")
     #     subject_models["Physics"] = physics_model
     #     print("✅ Physics model (local) ready")
     # except Exception as e:
@@ -33,7 +33,7 @@ def load_models():
 
     # Load only Chemistry model for testing
     try:
-        chemistry_model = BaselineModel(model_name="Fawl/is469_project_chem")
+        chemistry_model = FineTunedModel(model_name="Fawl/is469_project_chem")
         subject_models["Chemistry"] = chemistry_model
         print("✅ Chemistry model (local) ready")
     except Exception as e:
@@ -41,7 +41,7 @@ def load_models():
         subject_models["Chemistry"] = None
 
     # try:
-    #     biology_model = BaselineModel(model_name="Fawl/is469_project_bio")
+    #     biology_model = FineTunedModel(model_name="Fawl/is469_project_bio")
     #     subject_models["Biology"] = biology_model
     #     print("✅ Biology model (local) ready")
     # except Exception as e:
@@ -53,7 +53,7 @@ def load_models():
     # Skip baseline model to save memory - only using fine-tuned subject models
     # Uncomment below if you need a general baseline model later:
     # try:
-    #     baseline = BaselineModel(model_name="meta-llama/Llama-3.2-1B-Instruct")
+    #     baseline = FineTunedModel(model_name="meta-llama/Llama-3.2-1B-Instruct")
     #     baseline_loaded = True
     #     print("✅ General baseline model ready")
     # except Exception as e:
