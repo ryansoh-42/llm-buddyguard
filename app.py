@@ -275,6 +275,16 @@ st.session_state.safety_mode_enabled = enable_safety_mode
 
 show_metrics = st.sidebar.checkbox("Show Evaluation Metrics", value=False)
 
+# Reference answer input (for enhanced metrics)
+if show_metrics:
+    st.sidebar.markdown("### 📊 Enhanced Metrics")
+    enable_reference_mode = st.sidebar.checkbox("Enable Reference Answer Mode", value=False)
+    
+    if enable_reference_mode:
+        st.sidebar.info("💡 Providing reference answers enables ROUGE scores and order analysis")
+else:
+    enable_reference_mode = False
+
 # Main interface
 st.title("LLM BuddyGuard - O-Level Tutor")
 st.markdown("Your AI study companion for Singapore O-Level examinations")
@@ -312,6 +322,30 @@ for message in st.session_state.messages:
         if "metrics" in message and show_metrics:
             with st.expander("Evaluation Metrics"):
                 st.json(message["metrics"])
+
+# Reference answer input (for enhanced metrics)
+reference_answer = None
+if show_metrics and enable_reference_mode:
+    st.markdown("### 📝 Reference Answer (Optional)")
+    with st.expander("ℹ️ What is this?"):
+        st.info("""
+        **Reference Answer Mode** enables advanced metrics:
+        - **ROUGE Scores**: Content similarity analysis  
+        - **Order Analysis**: Step sequence validation
+        - **Text F1**: Word-level accuracy measurement
+        
+        Provide the expected/correct answer to unlock these metrics.
+        """)
+    
+    reference_answer = st.text_area(
+        "Enter the expected/correct answer for comparison:",
+        placeholder="Example: H2O is water, composed of 2 hydrogen atoms bonded to 1 oxygen atom...",
+        height=100,
+        help="This will be used to calculate ROUGE scores and reasoning order metrics"
+    )
+    
+    if reference_answer.strip():
+        st.success(f"✅ Reference provided ({len(reference_answer.split())} words) - Advanced metrics enabled!")
 
 # Chat input
 if prompt := st.chat_input("Ask your O-Level question..."):
@@ -366,24 +400,34 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                             # Define chemistry-specific keywords for API metrics
                             chemistry_keywords = ["atoms", "molecules", "electrons", "bonds", "equation", "balance", "reaction", "chemical", "formula"]
                             
+                            # Use reference answer if provided and not empty
+                            ref_answer = reference_answer.strip() if reference_answer and reference_answer.strip() else None
+                            
                             # Call backend API silently in background (no UI display)
                             backend_result = get_api_metrics(
                                 response=result["response"],
-                                reference_answer=None,
+                                reference_answer=ref_answer,
                                 expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
                             )
                             
                             # Log API result for debugging (not shown to user)
                             if backend_result:
-                                print(f"✅ Backend API called successfully: {backend_result['status']}")
+                                status = backend_result['status']
+                                message = backend_result.get('message', 'No details')
+                                print(f"✅ Backend API called successfully: {status} - {message}")
                             else:
                                 print("❌ Backend API failed")
                             
                             # Display the original 2-tab metrics UI
                             with st.expander("📊 Complete Evaluation Metrics"):
+                                if ref_answer:
+                                    st.info(f"🎯 Reference mode active - All metrics available!")
+                                else:
+                                    st.warning("⚠️ No reference answer - Limited metrics available")
+                                    
                                 display_dual_metrics(
                                     response=result["response"],
-                                    reference_answer=None,
+                                    reference_answer=ref_answer,
                                     expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
                                 )
                             
