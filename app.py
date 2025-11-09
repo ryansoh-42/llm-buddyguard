@@ -349,32 +349,58 @@ if show_metrics and enable_reference_mode:
 
 # Chat input
 if prompt := st.chat_input("Ask your O-Level question..."):
-    # Apply guardrails only if enabled
-    if enable_safety_mode:
-        guardrail_result = guardrails.apply_guardrails(prompt)
-    else:
-        # Bypass guardrails when disabled
-        guardrail_result = {
-            "allowed": True,
-            "message": "Safety guardrails disabled",
-            "modified_prompt": prompt
-        }
-        st.info("🔓 Safety guardrails are currently disabled")
-    
-    if not guardrail_result["allowed"]:
-        st.error(guardrail_result["message"])
-    else:
-        # Display user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # Immediately display the user's question in the chat history
+    user_message = {"role": "user", "content": prompt}
+    st.session_state.messages.append(user_message)
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    assistant_container = st.chat_message("assistant")
+    with assistant_container:
+        # Apply guardrails only if enabled
+        if enable_safety_mode:
+            with st.spinner("Validating your question..."):
+                guardrail_result = guardrails.apply_guardrails(prompt)
+        else:
+            # Bypass guardrails when disabled
+            guardrail_result = {
+                "allowed": True,
+                "message": "Safety guardrails disabled",
+                "modified_prompt": prompt
+            }
+            st.info("🔓 Safety guardrails are currently disabled")
         
-        # Show warning if answer-seeking detected (only when guardrails are enabled)
-        if enable_safety_mode and guardrail_result["message"] not in ["Prompt approved", "Safety guardrails disabled"]:
-            st.warning(guardrail_result["message"])
-        
-        # Generate response
-        with st.chat_message("assistant"):
+        if not guardrail_result["allowed"]:
+            violation_message = guardrail_result.get("message", "Your message was blocked by safety guardrails.")
+            violation_lines = []
+            for violation in guardrail_result.get("violations", []):
+                severity = violation.get("severity", "medium").upper()
+                category = violation.get("category", "unspecified").replace("_", " ").title()
+                reason = violation.get("reason", "Policy violation detected.")
+                detail = violation.get("details")
+                line = f"- **{severity} · {category}** — {reason}"
+                if detail and detail.strip() and detail.strip().lower() not in reason.lower():
+                    line += f"\n  > {detail.strip()}"
+                violation_lines.append(line)
+            
+            if guardrail_result.get("detected_content"):
+                detected_content = guardrail_result["detected_content"]
+                violation_lines.append(f"- Detected content: `{detected_content}`")
+            
+            if violation_lines:
+                violation_message += "\n\n**Validation details:**\n" + "\n".join(violation_lines)
+            
+            st.error("⚠️ Safety guardrail triggered.")
+            st.markdown(violation_message)
+            
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": violation_message
+            })
+        else:
+            # Show warning if answer-seeking detected (only when guardrails are enabled)
+            if enable_safety_mode and guardrail_result["message"] not in ["Prompt approved", "Safety guardrails disabled"]:
+                st.warning(guardrail_result["message"])
             
             # Helper function to get the appropriate model for the subject
             def get_subject_model():
