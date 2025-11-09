@@ -130,7 +130,7 @@ Can you think of two numbers that fit these conditions?"
         prompt: str,
         subject: str = "Mathematics",
         temperature: float = 0.7,
-        max_new_tokens: int = 256,
+        max_new_tokens: int = 512,
         do_sample: bool = True
     ) -> Dict:
         """
@@ -229,7 +229,7 @@ Can you think of two numbers that fit these conditions?"
     def batch_generate(
         self, 
         prompts: List[str], 
-        subject: str = "Mathematics"
+        subject: str = "Science"
     ) -> List[Dict]:
         """Generate responses for multiple prompts (for evaluation)."""
         results = []
