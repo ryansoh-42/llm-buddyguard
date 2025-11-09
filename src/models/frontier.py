@@ -42,7 +42,7 @@ class FrontierModel:
         Generate system prompt for Singapore O-Level tutoring.
         
         Args:
-            subject: One of "Physics", "Chemistry", or "Biology"
+            subject: One of "Mathematics", "Science", or "English"
         
         Returns:
             System prompt string
@@ -72,7 +72,7 @@ class FrontierModel:
             Dictionary with 'response', 'confidence', and 'usage'
         """
         
-        valid_subjects = ["Physics", "Chemistry", "Biology"]
+        valid_subjects = ["Mathematics", "Science", "English"]
         if subject not in valid_subjects:
             raise ValueError(f"Subject must be one of {valid_subjects}, got: {subject}")
         
@@ -201,7 +201,7 @@ class FrontierModel:
         
         Args:
             prompt: Student's question
-            subject: Subject area (required: "Physics", "Chemistry", or "Biology")
+            subject: Subject area (required: "Mathematics", "Science", or "English")
         
         Yields:
             Individual tokens as they arrive

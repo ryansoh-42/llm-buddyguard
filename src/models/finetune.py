@@ -105,25 +105,6 @@ When explaining:
 
 Answer physics questions directly but explain the reasoning behind your answers.
 """
-        elif subject.lower() == "biology":
-            return f"""You are an educational AI tutor for Singapore O-Level Biology students (ages 13-16).
-You specialise in Biology following the MOE curriculum.
-
-**GUIDELINES:**
-1. Provide clear, step-by-step explanations that build conceptual understanding
-2. Use correct biological terminology (e.g., organelles, enzymes, diffusion)
-3. Relate structures to their functions and highlight key processes (photosynthesis, respiration, etc.)
-4. Reference real-life examples from the Singapore syllabus where possible
-5. Maintain an encouraging, inquiry-based tone that prompts students to think
-
-When explaining:
-- Start with concise definitions of key terms
-- Describe relevant biological structures and their functions
-- Explain processes in logical stages (input → process → output)
-- Highlight common misconceptions and how to avoid them
-
-Answer biology questions directly but always explain the reasoning and link back to core biological principles.
-"""
         else:
             return f"""You are an educational AI tutor for Singapore O-Level students (ages 13-16).
 You specialise in {subject} following the MOE curriculum.
@@ -147,13 +128,10 @@ Can you think of two numbers that fit these conditions?"
     def generate(
         self,
         prompt: str,
-        subject: str = "General",
+        subject: str = "Mathematics",
         temperature: float = 0.7,
         max_new_tokens: int = 256,
-        do_sample: bool = False,
-        repetition_penalty: float = 1.2,
-        no_repeat_ngram_size: Optional[int] = None,
-        **generation_kwargs
+        do_sample: bool = True
     ) -> Dict:
         """
         Generate response from baseline model.
@@ -164,8 +142,6 @@ Can you think of two numbers that fit these conditions?"
             temperature: Sampling temperature
             max_new_tokens: Maximum new tokens to generate
             do_sample: Whether to use sampling
-            repetition_penalty: Penalty for repeated token sequences (>1.0 discourages repetition)
-            no_repeat_ngram_size: Prevents repeating n-grams of this size when set (>0)
             
         Returns:
             Dictionary with 'response' and 'metadata'
@@ -193,22 +169,14 @@ Can you think of two numbers that fit these conditions?"
             # Generate
             print(f"⚡ Starting generation with max_new_tokens={max_new_tokens}, temperature={temperature}")
             with torch.no_grad():
-                gen_kwargs = {
-                    "max_new_tokens": max_new_tokens,
-                    "temperature": temperature,
-                    "do_sample": do_sample,
-                    "repetition_penalty": repetition_penalty,
-                    "pad_token_id": self.tokenizer.pad_token_id,
-                    "eos_token_id": self.tokenizer.eos_token_id,
-                }
-
-                if no_repeat_ngram_size and no_repeat_ngram_size > 0:
-                    gen_kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
-
-                if generation_kwargs:
-                    gen_kwargs.update(generation_kwargs)
-
-                outputs = self.model.generate(**inputs, **gen_kwargs)
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    do_sample=do_sample,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id
+                )
             print(f"✅ Generation completed! Output shape: {outputs.shape}")
             
             # Clear GPU cache after generation to prevent memory buildup
@@ -261,7 +229,7 @@ Can you think of two numbers that fit these conditions?"
     def batch_generate(
         self, 
         prompts: List[str], 
-        subject: str = "General"
+        subject: str = "Mathematics"
     ) -> List[Dict]:
         """Generate responses for multiple prompts (for evaluation)."""
         results = []
@@ -270,3 +238,16 @@ Can you think of two numbers that fit these conditions?"
             result = self.generate(prompt, subject=subject)
             results.append(result)
         return results
+
+
+if __name__ == "__main__":
+    # Test fine-tuned model
+    model = FineTunedModel(model_name="meta-llama/Llama-3.2-3B-Instruct")
+
+    result = model.generate(
+        prompt="How do I find the area of a circle?",
+        subject="Mathematics",
+    )
+
+    print(f"Response: {result['response']}")
+    print(f"Metadata: {result['metadata']}")

@@ -62,7 +62,7 @@ class EducationalGuardrails:
             "criminal activity", "criminal gangs", "violence against animals", "animal cruelty", "weaponry", "bomb-making", 
             "militarization", "extreme nationalism", "radical political conspiracies", "terrorist recruitment", 
             "cult behavior", "death cults", "cultism", "extreme dieting", "unsafe sexual practices", "sex work", 
-            "prostitution", "illegal drug use", "pornography", "pornographic material", "incest", 
+            "prostitution", "illegal drug use", "pornography", "graphic content", "pornographic material", "incest", 
             "stalking", "rape culture", "date rape", "human experimentation", "human rights violations", "euthanasia", 
             "death threats", "mass shootings", "violent video games (without context)", "military violence", 
             "weaponized violence", "dangerous online behavior", "child labor", "child soldiers", 

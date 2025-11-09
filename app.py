@@ -315,29 +315,13 @@ st.divider()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-chat_history_placeholder = st.empty()
-
-
-def render_chat_history():
-    chat_history_placeholder.empty()
-    with chat_history_placeholder.container():
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-                if "metrics" in message and show_metrics:
-                    with st.expander("Evaluation Metrics"):
-                        st.json(message["metrics"])
-
-
-def add_message(role, content, metrics=None):
-    message = {"role": role, "content": content}
-    if metrics is not None:
-        message["metrics"] = metrics
-    st.session_state.messages.append(message)
-    render_chat_history()
-
-
-render_chat_history()
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if "metrics" in message and show_metrics:
+            with st.expander("Evaluation Metrics"):
+                st.json(message["metrics"])
 
 # Reference answer input (for enhanced metrics)
 reference_answer = None
@@ -364,237 +348,232 @@ if show_metrics and enable_reference_mode:
         st.success(f"✅ Reference provided ({len(reference_answer.split())} words) - Advanced metrics enabled!")
 
 # Chat input
-prompt = st.chat_input("Ask your O-Level question...")
+if prompt := st.chat_input("Ask your O-Level question..."):
+    # Immediately display the user's question in the chat history
+    user_message = {"role": "user", "content": prompt}
+    st.session_state.messages.append(user_message)
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-if prompt:
-    add_message("user", prompt)
-
-    assistant_response = None
-    metrics_payload = None
-    metrics_display_args = None
-
-    assistant_placeholder = st.empty()
-    with assistant_placeholder.container():
-        with st.chat_message("assistant"):
-            if enable_safety_mode:
-                with st.spinner("Validating your question..."):
-                    guardrail_result = guardrails.apply_guardrails(prompt)
-            else:
-                st.info("🔓 Safety guardrails are currently disabled")
-                guardrail_result = {
-                    "allowed": True,
-                    "message": "Safety guardrails disabled",
-                    "modified_prompt": prompt
-                }
-
-            if not guardrail_result["allowed"]:
-                violation_message = guardrail_result.get("message", "Your message was blocked by safety guardrails.")
-                violation_lines = []
-                for violation in guardrail_result.get("violations", []):
-                    severity = violation.get("severity", "medium").upper()
-                    category = violation.get("category", "unspecified").replace("_", " ").title()
-                    reason = violation.get("reason", "Policy violation detected.")
-                    detail = violation.get("details")
-                    line = f"- **{severity} · {category}** — {reason}"
-                    if detail and detail.strip() and detail.strip().lower() not in reason.lower():
-                        line += f"\n  > {detail.strip()}"
-                    violation_lines.append(line)
-
-                if guardrail_result.get("detected_content"):
-                    detected_content = guardrail_result["detected_content"]
-                    violation_lines.append(f"- Detected content: `{detected_content}`")
-
-                if violation_lines:
-                    violation_message += "\n\n**Validation details:**\n" + "\n".join(violation_lines)
-
-                st.error("⚠️ Safety guardrail triggered.")
-                st.markdown(violation_message)
-                assistant_response = violation_message
-            else:
-                if enable_safety_mode and guardrail_result["message"] not in ["Prompt approved", "Safety guardrails disabled"]:
-                    st.warning(guardrail_result["message"])
-
-                model_prompt = guardrail_result.get("modified_prompt", prompt)
-
-                def get_subject_model():
-                    if subject in subject_models and subject_models[subject] is not None:
-                        return subject_models[subject]
-                    if baseline_ok:
-                        return baseline_model
+    assistant_container = st.chat_message("assistant")
+    with assistant_container:
+        # Apply guardrails only if enabled
+        if enable_safety_mode:
+            with st.spinner("Validating your question..."):
+                guardrail_result = guardrails.apply_guardrails(prompt)
+        else:
+            # Bypass guardrails when disabled
+            guardrail_result = {
+                "allowed": True,
+                "message": "Safety guardrails disabled",
+                "modified_prompt": prompt
+            }
+            st.info("🔓 Safety guardrails are currently disabled")
+        
+        if not guardrail_result["allowed"]:
+            violation_message = guardrail_result.get("message", "Your message was blocked by safety guardrails.")
+            violation_lines = []
+            for violation in guardrail_result.get("violations", []):
+                severity = violation.get("severity", "medium").upper()
+                category = violation.get("category", "unspecified").replace("_", " ").title()
+                reason = violation.get("reason", "Policy violation detected.")
+                detail = violation.get("details")
+                line = f"- **{severity} · {category}** — {reason}"
+                if detail and detail.strip() and detail.strip().lower() not in reason.lower():
+                    line += f"\n  > {detail.strip()}"
+                violation_lines.append(line)
+            
+            if guardrail_result.get("detected_content"):
+                detected_content = guardrail_result["detected_content"]
+                violation_lines.append(f"- Detected content: `{detected_content}`")
+            
+            if violation_lines:
+                violation_message += "\n\n**Validation details:**\n" + "\n".join(violation_lines)
+            
+            st.error("⚠️ Safety guardrail triggered.")
+            st.markdown(violation_message)
+            
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": violation_message
+            })
+        else:
+            # Show warning if answer-seeking detected (only when guardrails are enabled)
+            if enable_safety_mode and guardrail_result["message"] not in ["Prompt approved", "Safety guardrails disabled"]:
+                st.warning(guardrail_result["message"])
+            
+            # Helper function to get the appropriate model for the subject
+            def get_subject_model():
+                if subject in subject_models and subject_models[subject] is not None:
+                    return subject_models[subject]
+                elif baseline_ok:
+                    return baseline_model
+                else:
                     return None
-
-                if model_choice == "Subject-Specific (Recommended)":
-                    model_to_use = get_subject_model()
-                    if model_to_use:
-                        model_type = "fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and
-                                                      subject_models.get(subject) != baseline_model) else "base"
-
-                        with st.spinner(f"Using {model_type} model for {subject}..."):
-                            result = model_to_use.generate(
-                                model_prompt,
-                                subject=subject,
-                                max_new_tokens=200,
-                                temperature=0.3,
-                                do_sample=False,
-                                repetition_penalty=1.2,
-                                no_repeat_ngram_size=3,
-                            )
-
-                        assistant_response = result["response"]
-
+            
+            if model_choice == "Subject-Specific (Recommended)":
+                # Use subject-specific model (fine-tuned if available, baseline if not)
+                model_to_use = get_subject_model()
+                if model_to_use:
+                    model_type = "fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and 
+                                                subject_models.get(subject) != baseline_model) else "base"
+                    
+                    with st.spinner(f"Using {model_type} model for {subject}..."):
+                        result = model_to_use.generate(prompt, subject=subject, max_new_tokens=200, temperature=0.3)
+                        st.markdown(result["response"])
+                        
                         if show_metrics:
+                            # Define chemistry-specific keywords for API metrics
                             chemistry_keywords = ["atoms", "molecules", "electrons", "bonds", "equation", "balance", "reaction", "chemical", "formula"]
+                            
+                            # Use reference answer if provided and not empty
                             ref_answer = reference_answer.strip() if reference_answer and reference_answer.strip() else None
-
+                            
+                            # Call backend API silently in background (no UI display)
                             backend_result = get_api_metrics(
                                 response=result["response"],
                                 reference_answer=ref_answer,
                                 expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
                             )
-
+                            
+                            # Log API result for debugging (not shown to user)
                             if backend_result:
                                 status = backend_result['status']
                                 message = backend_result.get('message', 'No details')
                                 print(f"✅ Backend API called successfully: {status} - {message}")
                             else:
                                 print("❌ Backend API failed")
-
-                            metrics_payload = evaluator.evaluate_response(result["response"])
-                            metrics_display_args = {
-                                "response": result["response"],
-                                "reference": ref_answer,
-                                "expected_keywords": chemistry_keywords if subject.lower() == "chemistry" else None
-                            }
-                    else:
-                        st.error(f"No model available for {subject}")
-                        assistant_response = f"No model available for {subject}"
-
-                elif model_choice == "General Baseline" and baseline_ok:
-                    with st.spinner("Using general baseline model..."):
-                        result = baseline_model.generate(
-                            model_prompt,
-                            subject=subject,
-                            max_new_tokens=256,
-                            temperature=0.7,
-                            do_sample=False,
-                            repetition_penalty=1.2,
-                            no_repeat_ngram_size=3,
-                        )
-
-                    assistant_response = result["response"]
-                    metrics_payload = evaluator.evaluate_response(result["response"]) if show_metrics else None
-
-                elif model_choice == "Frontier (GPT-4o)" and frontier_ok:
-                    response_placeholder = st.empty()
-                    full_response = ""
-
-                    with st.spinner("Streaming response from frontier model..."):
-                        for token in frontier_model.stream_generate(model_prompt, subject=subject):
-                            full_response += token
-                            response_placeholder.markdown(full_response)
-
-                    assistant_response = full_response
-
-                    if show_metrics:
-                        chemistry_keywords = ["atoms", "molecules", "electrons", "bonds", "equation", "balance", "reaction"]
-                        metrics_payload = evaluator.evaluate_response(full_response)
-                        metrics_display_args = {
-                            "response": full_response,
-                            "reference": None,
-                            "expected_keywords": chemistry_keywords if subject.lower() == "chemistry" else None
-                        }
-
-                elif model_choice == "Compare Models":
-                    subject_model_to_use = get_subject_model()
-
-                    if subject_model_to_use and frontier_ok:
-                        col1, col2 = st.columns(2)
-
-                        with col1:
-                            model_type = "Fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and
-                                                          subject_models.get(subject) != baseline_model) else "Base"
-                            st.markdown(f"**{model_type} {subject} Model**")
-                            with st.spinner("Generating..."):
-                                subject_result = subject_model_to_use.generate(
-                                    model_prompt,
-                                    subject=subject,
-                                    do_sample=False,
-                                    repetition_penalty=1.2,
-                                    no_repeat_ngram_size=3,
+                            
+                            # Display the original 2-tab metrics UI
+                            with st.expander("📊 Complete Evaluation Metrics"):
+                                if ref_answer:
+                                    st.info(f"🎯 Reference mode active - All metrics available!")
+                                else:
+                                    st.warning("⚠️ No reference answer - Limited metrics available")
+                                    
+                                display_dual_metrics(
+                                    response=result["response"],
+                                    reference_answer=ref_answer,
+                                    expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
                                 )
+                            
+                            # Store basic metrics for session
+                            metrics = evaluator.evaluate_response(result["response"])
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": result["response"],
+                                "metrics": metrics
+                            })
+                        else:
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": result["response"]
+                            })
+                else:
+                    st.error(f"No model available for {subject}")
+            
+            elif model_choice == "General Baseline" and baseline_ok:
+                with st.spinner("Using general baseline model..."):
+                    result = baseline_model.generate(prompt, subject=subject, max_new_tokens=256, temperature=0.7)
+                    st.markdown(result["response"])
+                    
+                    if show_metrics:
+                        metrics = evaluator.evaluate_response(result["response"])
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": result["response"],
+                            "metrics": metrics
+                        })
+                    else:
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": result["response"]
+                        })
+                        
+            elif model_choice == "Frontier (GPT-4o)" and frontier_ok:
+                response_placeholder = st.empty()
+                full_response = ""
+                
+                for token in frontier_model.stream_generate(prompt, subject=subject):
+                    full_response += token
+                    response_placeholder.markdown(full_response)
+                
+                if show_metrics:
+                    # Define some sample expected keywords for chemistry
+                    chemistry_keywords = ["atoms", "molecules", "electrons", "bonds", "equation", "balance", "reaction"]
+                    
+                    # Display dual metrics with enhanced info
+                    with st.expander("📊 Complete Evaluation Metrics"):
+                        display_dual_metrics(
+                            response=full_response,
+                            reference_answer=None,  # Could be enhanced with reference answers
+                            expected_keywords=chemistry_keywords if subject.lower() == "chemistry" else None
+                        )
+                    
+                    # Store basic metrics for session
+                    metrics = evaluator.evaluate_response(full_response)
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": full_response,
+                        "metrics": metrics
+                    })
+                else:
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": full_response
+                    })
+                    
+            elif model_choice == "Compare Models":
+                # Compare subject-specific vs frontier
+                subject_model_to_use = get_subject_model()
+                
+                if subject_model_to_use and frontier_ok:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        model_type = "Fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and 
+                                                    subject_models.get(subject) != baseline_model) else "Base"
+                        st.markdown(f"**{model_type} {subject} Model**")
+                        with st.spinner("Generating..."):
+                            subject_result = subject_model_to_use.generate(prompt, subject=subject)
                             st.markdown(subject_result["response"])
-
+                            
                             if show_metrics:
                                 metrics = evaluator.evaluate_response(subject_result["response"])
                                 with st.expander("Metrics"):
                                     st.json(metrics)
-
-                        with col2:
-                            st.markdown("**Frontier Model (GPT-4o)**")
-                            with st.spinner("Generating..."):
-                                frontier_result = frontier_model.generate(model_prompt, subject=subject)
+                    
+                    with col2:
+                        st.markdown("**Frontier Model (GPT-4o)**")
+                        with st.spinner("Generating..."):
+                            frontier_result = frontier_model.generate(prompt, subject=subject)
                             st.markdown(frontier_result["response"])
-
+                            
                             if show_metrics:
                                 metrics = evaluator.evaluate_response(frontier_result["response"])
                                 with st.expander("Metrics"):
                                     st.json(metrics)
-
-                        assistant_response = None  # handled via side-by-side display only
-                    elif subject_model_to_use and baseline_ok:
-                        col1, col2 = st.columns(2)
-
-                        with col1:
-                            model_type = "Fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and
-                                                          subject_models.get(subject) != baseline_model) else "Subject-Optimized"
-                            st.markdown(f"**{model_type} Model**")
-                            with st.spinner("Generating..."):
-                                subject_result = subject_model_to_use.generate(
-                                    model_prompt,
-                                    subject=subject,
-                                    do_sample=False,
-                                    repetition_penalty=1.2,
-                                    no_repeat_ngram_size=3,
-                                )
+                elif subject_model_to_use and baseline_ok:
+                    # Compare subject-specific vs general baseline
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        model_type = "Fine-tuned" if (subject in ["Physics", "Chemistry", "Biology"] and 
+                                                    subject_models.get(subject) != baseline_model) else "Subject-Optimized"
+                        st.markdown(f"**{model_type} Model**")
+                        with st.spinner("Generating..."):
+                            subject_result = subject_model_to_use.generate(prompt, subject=subject)
                             st.markdown(subject_result["response"])
-
-                        with col2:
-                            st.markdown("**General Baseline Model**")
-                            with st.spinner("Generating..."):
-                                baseline_result = baseline_model.generate(
-                                    model_prompt,
-                                    subject=subject,
-                                    do_sample=False,
-                                    repetition_penalty=1.2,
-                                    no_repeat_ngram_size=3,
-                                )
+                    
+                    with col2:
+                        st.markdown("**General Baseline Model**")
+                        with st.spinner("Generating..."):
+                            baseline_result = baseline_model.generate(prompt, subject=subject)
                             st.markdown(baseline_result["response"])
-
-                        assistant_response = None
-                    else:
-                        st.error("Not enough models loaded for comparison")
-                        assistant_response = "Not enough models loaded for comparison"
                 else:
-                    st.error("Selected model is not available")
-                    assistant_response = "Selected model is not available"
-
-    assistant_placeholder.empty()
-
-    if assistant_response:
-        add_message("assistant", assistant_response, metrics=metrics_payload)
-
-        if show_metrics and metrics_display_args:
-            with st.expander("📊 Complete Evaluation Metrics"):
-                if metrics_display_args.get("reference"):
-                    st.info("🎯 Reference mode active - All metrics available!")
-                else:
-                    st.warning("⚠️ No reference answer - Limited metrics available")
-
-                display_dual_metrics(
-                    response=metrics_display_args["response"],
-                    reference_answer=metrics_display_args.get("reference"),
-                    expected_keywords=metrics_display_args.get("expected_keywords")
-                )
+                    st.error("Not enough models loaded for comparison")
+            else:
+                st.error("Selected model is not available")
 
 # Footer
 st.sidebar.divider()
