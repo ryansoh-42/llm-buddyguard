@@ -1,6 +1,6 @@
 # src/models/baseline.py
 from typing import Dict, List, Optional
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 try:
     from transformers import AutoModelForInference
     HAS_INFERENCE_MODEL = True
@@ -61,7 +61,18 @@ class FineTunedModel:
         # Ensure padding token is set
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-            
+
+        # Shared generation defaults
+        self.generation_config = GenerationConfig.from_model_config(self.model.config)
+        self.generation_config.max_new_tokens = 256
+        self.generation_config.temperature = 0.7
+        self.generation_config.do_sample = False
+        self.generation_config.repetition_penalty = 1.2
+        self.generation_config.no_repeat_ngram_size = 3
+        self.generation_config.pad_token_id = self.tokenizer.pad_token_id
+        self.generation_config.eos_token_id = self.tokenizer.eos_token_id
+        self.model.generation_config = self.generation_config
+
         device = next(self.model.parameters()).device
         print(f"Model loaded on {device}")
 
@@ -128,10 +139,12 @@ Can you think of two numbers that fit these conditions?"
     def generate(
         self,
         prompt: str,
-        subject: str = "Mathematics",
-        temperature: float = 0.7,
-        max_new_tokens: int = 256,
-        do_sample: bool = True
+        subject: str = "General",
+        temperature: Optional[float] = None,
+        max_new_tokens: Optional[int] = None,
+        do_sample: Optional[bool] = None,
+        repetition_penalty: Optional[float] = None,
+        no_repeat_ngram_size: Optional[int] = None
     ) -> Dict:
         """
         Generate response from baseline model.
@@ -139,9 +152,11 @@ Can you think of two numbers that fit these conditions?"
         Args:
             prompt: Student's question
             subject: Subject area
-            temperature: Sampling temperature
-            max_new_tokens: Maximum new tokens to generate
-            do_sample: Whether to use sampling
+            temperature: Sampling temperature (defaults to shared generation config)
+            max_new_tokens: Maximum new tokens to generate (defaults to shared generation config)
+            do_sample: Whether to use sampling (defaults to shared generation config)
+            repetition_penalty: Penalty for repeated token sequences (>1.0 discourages repetition)
+            no_repeat_ngram_size: Prevents repeating n-grams of this size when set (>0)
             
         Returns:
             Dictionary with 'response' and 'metadata'
@@ -166,17 +181,43 @@ Can you think of two numbers that fit these conditions?"
             ).to(device)
             print(f"🎯 Input tokens: {inputs['input_ids'].shape[1]}")
             
+            # Resolve generation parameters (fallback to shared config)
+            resolved_max_new_tokens = max_new_tokens if max_new_tokens is not None else self.model.generation_config.max_new_tokens
+            if resolved_max_new_tokens is None:
+                resolved_max_new_tokens = 256
+
+            resolved_temperature = temperature if temperature is not None else self.model.generation_config.temperature
+            if resolved_temperature is None:
+                resolved_temperature = 0.7
+
+            resolved_do_sample = do_sample if do_sample is not None else self.model.generation_config.do_sample
+            if resolved_do_sample is None:
+                resolved_do_sample = False
+
+            resolved_repetition = repetition_penalty if repetition_penalty is not None else self.model.generation_config.repetition_penalty
+            if resolved_repetition is None:
+                resolved_repetition = 1.2
+
+            resolved_ngram = no_repeat_ngram_size if no_repeat_ngram_size is not None else self.model.generation_config.no_repeat_ngram_size
+            if resolved_ngram is not None and resolved_ngram <= 0:
+                resolved_ngram = None
+
             # Generate
-            print(f"⚡ Starting generation with max_new_tokens={max_new_tokens}, temperature={temperature}")
+            print(f"⚡ Starting generation with max_new_tokens={resolved_max_new_tokens}, temperature={resolved_temperature}, do_sample={resolved_do_sample}")
             with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    do_sample=do_sample,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id
-                )
+                gen_kwargs = {
+                    "max_new_tokens": resolved_max_new_tokens,
+                    "temperature": resolved_temperature,
+                    "do_sample": resolved_do_sample,
+                    "repetition_penalty": resolved_repetition,
+                    "pad_token_id": self.model.generation_config.pad_token_id,
+                    "eos_token_id": self.model.generation_config.eos_token_id,
+                }
+
+                if resolved_ngram:
+                    gen_kwargs["no_repeat_ngram_size"] = resolved_ngram
+
+                outputs = self.model.generate(**inputs, **gen_kwargs)
             print(f"✅ Generation completed! Output shape: {outputs.shape}")
             
             # Clear GPU cache after generation to prevent memory buildup
@@ -229,7 +270,7 @@ Can you think of two numbers that fit these conditions?"
     def batch_generate(
         self, 
         prompts: List[str], 
-        subject: str = "Mathematics"
+        subject: str = "General"
     ) -> List[Dict]:
         """Generate responses for multiple prompts (for evaluation)."""
         results = []
@@ -241,12 +282,12 @@ Can you think of two numbers that fit these conditions?"
 
 
 if __name__ == "__main__":
-    # Test fine-tuned model
+    # Quick manual smoke test
     model = FineTunedModel(model_name="meta-llama/Llama-3.2-3B-Instruct")
 
     result = model.generate(
-        prompt="How do I find the area of a circle?",
-        subject="Mathematics",
+        prompt="Explain how the respiratory system facilitates gas exchange.",
+        subject="Biology",
     )
 
     print(f"Response: {result['response']}")

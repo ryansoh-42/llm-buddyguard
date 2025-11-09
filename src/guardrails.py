@@ -6,7 +6,7 @@ from guardrails.hub import (
     DetectPII,
     ProfanityFree,
     RestrictToTopic,
-    # BanList,
+    BanList,
 )
 import logging
 import re
@@ -70,13 +70,10 @@ class EducationalGuardrails:
             "extreme political ideologies", "extreme conspiracy theories"
         ]
 
-        # # High-risk words to block explicitly
-        # self.banned_words = [
-        #     "hijack", "bomb", "explosive", "gun", "terrorist", "terrorism",
-        #     "crash a building", "weapon of mass destruction", "massacre",
-        #     "school shooting", "shoot up", "detonate", "suicide attack",
-        #     "make a bomb", "kill people", "destroy building"
-        # ]
+        # High-risk words to block explicitly
+        self.banned_words = [
+            "hijack", "bomb", "terrorism", "self-harm", "suicide"
+        ]
         
         # Create input guard for user prompts
         self.input_guard = Guard().use_many(
@@ -102,11 +99,11 @@ class EducationalGuardrails:
                 invalid_topics=invalid_topics,
                 on_fail=OnFailAction.EXCEPTION
             ),
-            # # Explicit ban list for violent / criminal content
-            # BanList(
-            #     banned_words=self.banned_phrases,
-            #     on_fail=OnFailAction.EXCEPTION
-            # )
+            # Explicit ban list for violent / criminal content
+            BanList(
+                banned_words=self.banned_words,
+                on_fail=OnFailAction.EXCEPTION
+            )
         )
         
         # Create output guard for model responses (without topic restriction)
@@ -118,16 +115,16 @@ class EducationalGuardrails:
             ),
             DetectPII(
                 pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
-                             "SSN", "IP_ADDRESS"],
+                             "SSN", "IP_ADDRESS", "PASSPORT_NUMBER"],
                 on_fail=OnFailAction.EXCEPTION
             ),
             ProfanityFree(
                 on_fail=OnFailAction.EXCEPTION
             ),
-            # BanList(
-            #     banned_words=self.banned_phrases,
-            #     on_fail=OnFailAction.EXCEPTION
-            # ),
+            BanList(
+                banned_words=self.banned_words,
+                on_fail=OnFailAction.EXCEPTION
+            ),
         )
         
         # Educational-specific patterns for answer-seeking detection
@@ -223,6 +220,31 @@ class EducationalGuardrails:
                     "reason": "Content is not related to allowed educational topics (Physics, Chemistry, Biology)",
                     "details": "The question does not appear to be related to Physics, Chemistry, or Biology subjects."
                 })
+            
+            if "banlist" in error_lower or "bannedlist" in error_lower or "banned_content" in error_lower:
+                content = self._extract_detected_content(error_message, "banned")
+                if content:
+                    detected_content_list.append(f"banned_content: {content}")
+                violations.append({
+                    "category": "banned_content",
+                    "severity": "high",
+                    "reason": "The request contains material flagged as banned content",
+                    "details": "This content is not permitted under the tutoring safety policies."
+                })
+            
+            if not any(v.get("category") == "banned_content" for v in violations):
+                banned_hits = [
+                    word for word in self.banned_words
+                    if re.search(rf"\b{re.escape(word)}\b", prompt, flags=re.IGNORECASE)
+                ]
+                if banned_hits:
+                    detected_content_list.append(f"banned_content: {', '.join(banned_hits)}")
+                    violations.append({
+                        "category": "banned_content",
+                        "severity": "high",
+                        "reason": "The request contains material flagged as banned content",
+                        "details": f"The following banned terms were detected: {', '.join(banned_hits)}"
+                    })
             
             # If no specific violations were detected, add an unspecified violation
             if not violations:
