@@ -92,7 +92,7 @@ class EducationalGuardrails:
                 ),
                 DetectPII(
                     pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
-                                 "SSN", "IP_ADDRESS", "DATE_TIME", "LOCATION"],
+                                    "SSN", "IP_ADDRESS", "DATE_TIME"],
                     on_fail=OnFailAction.NOOP
                 ),
                 ProfanityFree(
@@ -126,7 +126,7 @@ class EducationalGuardrails:
             ),
             DetectPII(
                 pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
-                             "SSN", "IP_ADDRESS", "PASSPORT_NUMBER"],
+                                "SSN", "IP_ADDRESS", "PASSPORT_NUMBER"],
                 on_fail=OnFailAction.NOOP
             ),
             ProfanityFree(
@@ -435,9 +435,8 @@ class EducationalGuardrails:
             "ssn": "Social Security Number",
             "credit": "Credit Card",
             "ip": "IP Address",
-            "date": "Date of Birth",
-            "location": "Location"
-        }
+            "date": "Date of Birth"
+            }
         
         for keyword, label in pii_keywords.items():
             if keyword in error_lower:
