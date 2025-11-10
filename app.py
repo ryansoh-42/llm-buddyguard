@@ -390,7 +390,7 @@ if prompt := st.chat_input("Ask your O-Level question..."):
             if violation_lines:
                 violation_message += "\n\n**Validation details:**\n" + "\n".join(violation_lines)
             
-            st.error("⚠️ Safety guardrail triggered.")
+            st.error("⚠️ Inappropriate content detected.")
             st.markdown(violation_message)
             
             st.session_state.messages.append({
