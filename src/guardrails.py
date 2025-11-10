@@ -163,6 +163,7 @@ class EducationalGuardrails:
         Args:
             prompt: Text to validate
             is_input: True if validating user input, False if validating model output
+            subject: Subject context for more specific error messages
             
         Returns:
             Dictionary with 'allowed', 'message', 'violations'
@@ -177,7 +178,7 @@ class EducationalGuardrails:
             outcome = guard.validate(prompt)
         except Exception as e:
             # Fallback to legacy exception parsing path (should be rare with NOOP on_fail)
-            return self._build_violation_result_from_message(str(e), prompt)
+            return self._build_violation_result_from_message(str(e), prompt, subject)
         
         # Guardrails may return plain strings (legacy) or ValidationOutcome objects
         from guardrails.classes.validation_outcome import ValidationOutcome  # type: ignore
@@ -192,7 +193,7 @@ class EducationalGuardrails:
                     "validated_text": validated_text
                 }
             
-            return self._build_violation_result_from_outcome(outcome, prompt)
+            return self._build_violation_result_from_outcome(outcome, prompt, subject)
         
         # Fallback for legacy behaviour where validate returns a simple string
         return {
@@ -202,7 +203,7 @@ class EducationalGuardrails:
             "validated_text": outcome if isinstance(outcome, str) else prompt
         }
 
-    def _build_violation_result_from_outcome(self, outcome, prompt: str) -> Dict:
+    def _build_violation_result_from_outcome(self, outcome, prompt: str, subject: Optional[str] = None) -> Dict:
         summaries = getattr(outcome, "validation_summaries", None) or []
         failure_messages = []
         for summary in summaries:
@@ -226,13 +227,13 @@ class EducationalGuardrails:
             combined_message = str(outcome.error)
         if not combined_message:
             combined_message = "Validation failed"
-        result = self._build_violation_result_from_message(combined_message, prompt)
+        result = self._build_violation_result_from_message(combined_message, prompt, subject)
         # Preserve any partial validated output for debugging context
         if outcome.validated_output is not None:
             result["validated_text"] = outcome.validated_output
         return result
 
-    def _build_violation_result_from_message(self, error_message: str, prompt: str) -> Dict:
+    def _build_violation_result_from_message(self, error_message: str, prompt: str, subject: Optional[str] = None) -> Dict:
         violations = []
         detected_content_list: List[str] = []
         error_lower = (error_message or "").lower()
@@ -278,11 +279,21 @@ class EducationalGuardrails:
             content = self._extract_detected_content(error_message, "topic")
             if content:
                 detected_content_list.append(f"topic: {content}")
+            
+            # Make the message subject-specific if subject is provided
+            if subject and subject in ["physics", "chemistry", "biology"]:
+                subject_title = subject.capitalize()
+                reason = f"Question does not appear related to {subject_title}"
+                details = f"The question does not appear to be related to {subject_title}. Please ask a question within the {subject_title} curriculum."
+            else:
+                reason = "Content is not related to allowed educational topics (Physics, Chemistry, Biology)"
+                details = "The question does not appear to be related to Physics, Chemistry, or Biology subjects."
+            
             violations.append({
                 "category": "off_topic",
                 "severity": "medium",
-                "reason": "Content is not related to allowed educational topics (Physics, Chemistry, Biology)",
-                "details": "The question does not appear to be related to Physics, Chemistry, or Biology subjects."
+                "reason": reason,
+                "details": details
             })
 
         if "banlist" in error_lower or "bannedlist" in error_lower or "banned_content" in error_lower:
@@ -345,8 +356,9 @@ class EducationalGuardrails:
             key=lambda v: severity_order.get(v.get("severity", "medium"), 1)
         )
         
-        # Get primary category from most severe violation
-        primary_category = sorted_violations[0].get("category", "unspecified")
+        # Get primary violation
+        primary_violation = sorted_violations[0]
+        primary_category = primary_violation.get("category", "unspecified")
         
         # If multiple violations, mention them
         if len(violations) > 1:
@@ -362,7 +374,16 @@ class EducationalGuardrails:
                 "unspecified": "Your message could not be processed. Please rephrase your question."
             }
             
-            primary_message = messages.get(primary_category, messages["unspecified"])
+            # For off_topic, check if we have a subject-specific message
+            if primary_category == "off_topic" and primary_violation.get("reason"):
+                reason = primary_violation.get("reason", "")
+                if "Question does not appear related to" in reason:
+                    # Use the subject-specific reason directly
+                    primary_message = f"{reason}. Please ask a question related to the selected subject."
+                else:
+                    primary_message = messages.get(primary_category, messages["unspecified"])
+            else:
+                primary_message = messages.get(primary_category, messages["unspecified"])
             
             # Add note about multiple issues if applicable
             if len(unique_categories) > 1:
@@ -370,7 +391,7 @@ class EducationalGuardrails:
             
             return primary_message
         
-        # Single violation - use standard message
+        # Single violation - use subject-specific message if available
         messages = {
             "toxic": "Your message contains inappropriate language. Please rephrase your question.",
             "pii": "Please do not share personal information. Ask your question without including personal details.",
@@ -379,6 +400,13 @@ class EducationalGuardrails:
             "banned_content": "Your message includes restricted or unsafe content. Please rephrase your question.",
             "unspecified": "Your message could not be processed. Please rephrase your question."
         }
+        
+        # For off_topic violations, use subject-specific reason if available
+        if primary_category == "off_topic" and primary_violation.get("reason"):
+            reason = primary_violation.get("reason", "")
+            if "Question does not appear related to" in reason:
+                # Use the subject-specific reason directly
+                return f"{reason}. Please ask a question related to the selected subject."
         
         return messages.get(primary_category, messages["unspecified"])
     
