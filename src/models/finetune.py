@@ -141,7 +141,7 @@ Can you think of two numbers that fit these conditions?"
         prompt: str,
         subject: str = "General",
         temperature: Optional[float] = None,
-        max_new_tokens: Optional[int] = 512,
+        max_new_tokens: Optional[int] = 256,
         do_sample: Optional[bool] = None,
         repetition_penalty: Optional[float] = None,
         no_repeat_ngram_size: Optional[int] = None
