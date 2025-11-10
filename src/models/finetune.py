@@ -252,7 +252,7 @@ Can you think of two numbers that fit these conditions?"
 
             neg_log_likelihood = outputs.loss
             avg_neg_log_likelihood = neg_log_likelihood / output_length
-            ppl = torch.exp(avg_neg_log_likelihood)
+            ppl = torch.exp(avg_neg_log_likelihood).item()
             
             return {
                 "response": response_text.strip(),
