@@ -81,28 +81,28 @@ class EducationalGuardrails:
             ToxicLanguage(
                 threshold=toxicity_threshold,
                 validation_method="sentence",
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
             # PII detection
             DetectPII(
                 pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
                              "SSN", "IP_ADDRESS", "DATE_TIME", "LOCATION"],
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
             # Profanity detection
             ProfanityFree(
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
             # Topic restriction - ensure content is about allowed subjects
             RestrictToTopic(
                 valid_topics=allowed_topics,
                 invalid_topics=invalid_topics,
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
             # Explicit ban list for violent / criminal content
             BanList(
                 banned_words=self.banned_words,
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             )
         )
         
@@ -111,19 +111,19 @@ class EducationalGuardrails:
             ToxicLanguage(
                 threshold=toxicity_threshold,
                 validation_method="sentence",
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
             DetectPII(
                 pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
                              "SSN", "IP_ADDRESS", "PASSPORT_NUMBER"],
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
             ProfanityFree(
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
             BanList(
                 banned_words=self.banned_words,
-                on_fail=OnFailAction.EXCEPTION
+                on_fail=OnFailAction.NOOP
             ),
         )
         
@@ -152,123 +152,163 @@ class EducationalGuardrails:
         guard = self.input_guard if is_input else self.output_guard
         
         try:
-            # Validate using Guardrails AI
-            validated = guard.validate(prompt)
-            
-            return {
-                "allowed": True,
-                "message": "Prompt approved",
-                "violations": [],
-                "validated_text": validated if isinstance(validated, str) else prompt
-            }
-            
+            outcome = guard.validate(prompt)
         except Exception as e:
-            # Extract violation details from exception
-            error_message = str(e)
-            violations = []
-            detected_content_list = []  # Collect all detected content from multiple violations
+            # Fallback to legacy exception parsing path (should be rare with NOOP on_fail)
+            return self._build_violation_result_from_message(str(e), prompt)
+        
+        # Guardrails may return plain strings (legacy) or ValidationOutcome objects
+        from guardrails.classes.validation_outcome import ValidationOutcome  # type: ignore
+        
+        if isinstance(outcome, ValidationOutcome):
+            if outcome.validation_passed:
+                validated_text = outcome.validated_output if outcome.validated_output is not None else prompt
+                return {
+                    "allowed": True,
+                    "message": "Prompt approved",
+                    "violations": [],
+                    "validated_text": validated_text
+                }
             
-            # Parse error message to identify violation type and extract details
-            error_lower = error_message.lower()
-            
-            if "toxic" in error_lower or "toxiclanguage" in error_lower:
-                # Try to extract specific toxic content if available
-                content = self._extract_detected_content(error_message, "toxic")
-                if content:
-                    detected_content_list.append(f"toxic: {content}")
-                violations.append({
-                    "category": "toxic",
-                    "severity": "high",
-                    "reason": "Content contains toxic, harmful, or inappropriate language",
-                    "details": "The message includes language that may be offensive, harmful, or inappropriate for an educational environment."
-                })
-            
-            if "pii" in error_lower or "detectpii" in error_lower:
-                # Try to extract PII types detected
-                content = self._extract_detected_content(error_message, "pii")
-                if content:
-                    detected_content_list.append(f"pii: {content}")
-                pii_types = self._extract_pii_types(error_message)
-                reason = "Content contains personally identifiable information"
-                if pii_types:
-                    reason += f" ({', '.join(pii_types)})"
-                violations.append({
-                    "category": "pii",
-                    "severity": "high",
-                    "reason": reason,
-                    "details": "Personal information such as email addresses, phone numbers, credit cards, or other sensitive data was detected."
-                })
-            
-            if "profanity" in error_lower or "profanityfree" in error_lower:
-                content = self._extract_detected_content(error_message, "profanity")
-                if content:
-                    detected_content_list.append(f"profanity: {content}")
-                violations.append({
-                    "category": "profanity",
-                    "severity": "medium",
-                    "reason": "Content contains profane or inappropriate language",
-                    "details": "The message includes words or phrases that are not appropriate for an educational setting."
-                })
-            
-            if "topic" in error_lower or "restricttotopic" in error_lower:
-                content = self._extract_detected_content(error_message, "topic")
-                if content:
-                    detected_content_list.append(f"topic: {content}")
-                violations.append({
-                    "category": "off_topic",
-                    "severity": "medium",
-                    "reason": "Content is not related to allowed educational topics (Physics, Chemistry, Biology)",
-                    "details": "The question does not appear to be related to Physics, Chemistry, or Biology subjects."
-                })
-            
-            if "banlist" in error_lower or "bannedlist" in error_lower or "banned_content" in error_lower:
-                content = self._extract_detected_content(error_message, "banned")
-                if content:
-                    detected_content_list.append(f"banned_content: {content}")
+            return self._build_violation_result_from_outcome(outcome, prompt)
+        
+        # Fallback for legacy behaviour where validate returns a simple string
+        return {
+            "allowed": True,
+            "message": "Prompt approved",
+            "violations": [],
+            "validated_text": outcome if isinstance(outcome, str) else prompt
+        }
+
+    def _build_violation_result_from_outcome(self, outcome, prompt: str) -> Dict:
+        summaries = getattr(outcome, "validation_summaries", None) or []
+        failure_messages = []
+        for summary in summaries:
+            try:
+                status = (summary.validator_status or "").lower()
+            except AttributeError:
+                status = (getattr(summary, "validatorStatus", "") or "").lower()
+            if status not in ("fail", "failed"):
+                continue
+            name = getattr(summary, "validator_name", None) or getattr(summary, "validatorName", "") or ""
+            failure_reason = getattr(summary, "failure_reason", None) or getattr(summary, "failureReason", "") or ""
+            text_parts = []
+            if name:
+                text_parts.append(name.strip())
+            if failure_reason:
+                text_parts.append(failure_reason.strip())
+            if text_parts:
+                failure_messages.append(": ".join(text_parts))
+        combined_message = " | ".join(failure_messages).strip()
+        if not combined_message and getattr(outcome, "error", None):
+            combined_message = str(outcome.error)
+        if not combined_message:
+            combined_message = "Validation failed"
+        result = self._build_violation_result_from_message(combined_message, prompt)
+        # Preserve any partial validated output for debugging context
+        if outcome.validated_output is not None:
+            result["validated_text"] = outcome.validated_output
+        return result
+
+    def _build_violation_result_from_message(self, error_message: str, prompt: str) -> Dict:
+        violations = []
+        detected_content_list: List[str] = []
+        error_lower = (error_message or "").lower()
+
+        if "toxic" in error_lower or "toxiclanguage" in error_lower:
+            content = self._extract_detected_content(error_message, "toxic")
+            if content:
+                detected_content_list.append(f"toxic: {content}")
+            violations.append({
+                "category": "toxic",
+                "severity": "high",
+                "reason": "Content contains toxic, harmful, or inappropriate language",
+                "details": "The message includes language that may be offensive, harmful, or inappropriate for an educational environment."
+            })
+
+        if "pii" in error_lower or "detectpii" in error_lower:
+            content = self._extract_detected_content(error_message, "pii")
+            if content:
+                detected_content_list.append(f"pii: {content}")
+            pii_types = self._extract_pii_types(error_message)
+            reason = "Content contains personally identifiable information"
+            if pii_types:
+                reason += f" ({', '.join(pii_types)})"
+            violations.append({
+                "category": "pii",
+                "severity": "high",
+                "reason": reason,
+                "details": "Personal information such as email addresses, phone numbers, credit cards, or other sensitive data was detected."
+            })
+
+        if "profanity" in error_lower or "profanityfree" in error_lower:
+            content = self._extract_detected_content(error_message, "profanity")
+            if content:
+                detected_content_list.append(f"profanity: {content}")
+            violations.append({
+                "category": "profanity",
+                "severity": "medium",
+                "reason": "Content contains profane or inappropriate language",
+                "details": "The message includes words or phrases that are not appropriate for an educational setting."
+            })
+
+        if "topic" in error_lower or "restricttotopic" in error_lower:
+            content = self._extract_detected_content(error_message, "topic")
+            if content:
+                detected_content_list.append(f"topic: {content}")
+            violations.append({
+                "category": "off_topic",
+                "severity": "medium",
+                "reason": "Content is not related to allowed educational topics (Physics, Chemistry, Biology)",
+                "details": "The question does not appear to be related to Physics, Chemistry, or Biology subjects."
+            })
+
+        if "banlist" in error_lower or "bannedlist" in error_lower or "banned_content" in error_lower:
+            content = self._extract_detected_content(error_message, "banned")
+            if content:
+                detected_content_list.append(f"banned_content: {content}")
+            violations.append({
+                "category": "banned_content",
+                "severity": "high",
+                "reason": "The request contains material flagged as banned content",
+                "details": "This content is not permitted under the tutoring safety policies."
+            })
+
+        if not any(v.get("category") == "banned_content" for v in violations):
+            banned_hits = [
+                word for word in self.banned_words
+                if re.search(rf"\b{re.escape(word)}\b", prompt, flags=re.IGNORECASE)
+            ]
+            if banned_hits:
+                detected_content_list.append(f"banned_content: {', '.join(banned_hits)}")
                 violations.append({
                     "category": "banned_content",
                     "severity": "high",
                     "reason": "The request contains material flagged as banned content",
-                    "details": "This content is not permitted under the tutoring safety policies."
+                    "details": f"The following banned terms were detected: {', '.join(banned_hits)}"
                 })
-            
-            if not any(v.get("category") == "banned_content" for v in violations):
-                banned_hits = [
-                    word for word in self.banned_words
-                    if re.search(rf"\b{re.escape(word)}\b", prompt, flags=re.IGNORECASE)
-                ]
-                if banned_hits:
-                    detected_content_list.append(f"banned_content: {', '.join(banned_hits)}")
-                    violations.append({
-                        "category": "banned_content",
-                        "severity": "high",
-                        "reason": "The request contains material flagged as banned content",
-                        "details": f"The following banned terms were detected: {', '.join(banned_hits)}"
-                    })
-            
-            # If no specific violations were detected, add an unspecified violation
-            if not violations:
-                violations.append({
-                    "category": "unspecified",
-                    "severity": "medium",
-                    "reason": "Content validation failed",
-                    "details": error_message
-                })
-            
-            logger.warning(f"Guardrails validation failed: {error_message}")
-            
-            result = {
-                "allowed": False,
-                "message": self._get_user_friendly_message(violations),
-                "violations": violations,
-                "validated_text": None
-            }
-            
-            # Include all detected content if any was found
-            if detected_content_list:
-                result["detected_content"] = "; ".join(detected_content_list)
-                
-            return result
+
+        if not violations:
+            violations.append({
+                "category": "unspecified",
+                "severity": "medium",
+                "reason": "Content validation failed",
+                "details": error_message
+            })
+
+        logger.warning(f"Guardrails validation failed: {error_message}")
+
+        result = {
+            "allowed": False,
+            "message": self._get_user_friendly_message(violations),
+            "violations": violations,
+            "validated_text": None
+        }
+
+        if detected_content_list:
+            result["detected_content"] = "; ".join(detected_content_list)
+
+        return result
     
     def _get_user_friendly_message(self, violations: List[Dict]) -> str:
         """Convert technical violation messages to user-friendly messages."""
@@ -296,6 +336,7 @@ class EducationalGuardrails:
                 "pii": "Please do not share personal information. Ask your question without including personal details.",
                 "profanity": "Your message contains inappropriate language. Please use respectful language.",
                 "off_topic": "Please ask a question related to Physics, Chemistry, or Biology.",
+                "banned_content": "Your message includes restricted or unsafe content. Please rephrase your question.",
                 "unspecified": "Your message could not be processed. Please rephrase your question."
             }
             
@@ -313,6 +354,7 @@ class EducationalGuardrails:
             "pii": "Please do not share personal information. Ask your question without including personal details.",
             "profanity": "Your message contains inappropriate language. Please use respectful language.",
             "off_topic": "Please ask a question related to Physics, Chemistry, or Biology.",
+            "banned_content": "Your message includes restricted or unsafe content. Please rephrase your question.",
             "unspecified": "Your message could not be processed. Please rephrase your question."
         }
         
