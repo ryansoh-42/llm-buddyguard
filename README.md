@@ -49,11 +49,35 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Install Models Locally
+### 2. Install Guardrails AI Validators
+
+The project uses Guardrails AI for content safety. Install the required validators:
+
+```bash
+# Create Guardrails AI account and retrieve API key
+guardrails configure
+
+
+# Install Guardrails AI validators
+guardrails hub install hub://guardrails/toxic_language
+guardrails hub install hub://guardrails/detect_pii
+guardrails hub install hub://guardrails/profanity_free
+guardrails hub install hub://tryolabs/restricttotopic
+guardrails hub install hub://guardrails/ban_list
+```
+
+These validators provide:
+- **toxic_language**: Detects toxic, harmful, or inappropriate language
+- **detect_pii**: Identifies personally identifiable information (emails, phone numbers, etc.)
+- **profanity_free**: Filters profane or offensive language
+- **restricttotopic**: Ensures content stays within allowed educational topics
+- **ban_list**: Blocks explicitly banned terms and phrases
+
+### 3. Install Models Locally
 
 The project now uses fine-tuned models that need to be downloaded locally:
 
-#### Step 2.1: Hugging Face Authentication
+#### Step 3.1: Hugging Face Authentication
 ```bash
 # Install HF CLI (if not already installed)
 pip install huggingface_hub
@@ -62,7 +86,7 @@ pip install huggingface_hub
 huggingface-cli login
 ```
 
-#### Step 2.2: Download Fine-tuned Models
+#### Step 3.2: Download Fine-tuned Models
 The models will be automatically downloaded when first loaded. To pre-download:
 
 ```bash
@@ -81,7 +105,7 @@ for model in models:
 "
 ```
 
-### 3. Configure Subject Models
+### 4. Configure Subject Models
 
 #### Enable/Disable Specific Subjects
 In `app.py`, you can configure which models to load:
@@ -106,7 +130,7 @@ print("ℹ️ Physics model disabled for testing")
 - **Two models**: ~12-14GB memory usage  
 - **All three models**: ~18-20GB memory usage
 
-### 4. Run the Application
+### 5. Run the Application
 
 ```bash
 # Start Streamlit app
@@ -115,7 +139,7 @@ streamlit run app.py
 
 Open http://localhost:8501 in your browser.
 
-### 5. Test the System
+### 6. Test the System
 
 1. **Select Subject**: Choose Physics, Chemistry, or Biology in the sidebar
 2. **Ask Questions**: Try subject-specific questions:
