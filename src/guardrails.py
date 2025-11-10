@@ -31,18 +31,26 @@ class EducationalGuardrails:
         # Configure threshold based on strictness
         toxicity_threshold = 0.3 if strict_mode else 0.5
         
-        # Define allowed topics for RestrictToTopic (only Physics, Chemistry, Biology)
-        allowed_topics = [
-            "physics", "chemistry", "biology", "science",
+        # Define allowed topics per subject for RestrictToTopic
+        physics_topics = [
+            "physics",
             "measurement", "physical quantities", "units and measurement",
             "newtonian mechanics", "kinematics", "dynamics", "turning effect of forces", "pressure", "energy",
             "thermal physics", "kinetic particle model of matter", "thermal processes", "thermal properties of matter",
             "waves", "general properties of waves", "electromagnetic spectrum", "light",
             "electricity and magnetism", "static electricity", "current of electricity", "direct current circuits", "practical electricity", "magnetism", "electromagnetism", "electromagnetic induction",
             "radioactivity",
+        ]
+
+        chemistry_topics = [
+            "chemistry",
             "matter", "structure and properties", "experimental chemistry", "the particulate nature of matter", "chemical bonding and structure",
             "chemical reactions", "chemical calculations", "acid-base chemistry", "qualitative analysis", "redox chemistry", "patterns in the periodic table", "chemical energetics", "rate of reactions",
-            "organic chemistry", "maintaining air quality",
+            "organic chemistry", "maintaining air quality"
+        ]
+
+        biology_topics = [
+            "biology",
             "cells and the chemistry of life", "cell structure and organisation", "movement of substances", "biological molecules",
             "the human body - maintaing life", "nutrition in humans", "transport in humans", "respiration in humans", "excretion in humans", "homeostasis, coordination and response in humans", "infectious diseases in humans",
             "living together - plants, animals and ecosystems", "nutrition and transport in flowering plants", "organisms and their environment",
@@ -75,36 +83,39 @@ class EducationalGuardrails:
             "hijack", "bomb", "terrorism", "self-harm", "suicide"
         ]
         
-        # Create input guard for user prompts
-        self.input_guard = Guard().use_many(
-            # Toxic language detection
-            ToxicLanguage(
-                threshold=toxicity_threshold,
-                validation_method="sentence",
-                on_fail=OnFailAction.NOOP
-            ),
-            # PII detection
-            DetectPII(
-                pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
-                             "SSN", "IP_ADDRESS", "DATE_TIME", "LOCATION"],
-                on_fail=OnFailAction.NOOP
-            ),
-            # Profanity detection
-            ProfanityFree(
-                on_fail=OnFailAction.NOOP
-            ),
-            # Topic restriction - ensure content is about allowed subjects
-            RestrictToTopic(
-                valid_topics=allowed_topics,
-                invalid_topics=invalid_topics,
-                on_fail=OnFailAction.NOOP
-            ),
-            # Explicit ban list for violent / criminal content
-            BanList(
-                banned_words=self.banned_words,
-                on_fail=OnFailAction.NOOP
+        def _create_input_guard(valid_topics: List[str]) -> Guard:
+            return Guard().use_many(
+                ToxicLanguage(
+                    threshold=toxicity_threshold,
+                    validation_method="sentence",
+                    on_fail=OnFailAction.NOOP
+                ),
+                DetectPII(
+                    pii_entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
+                                 "SSN", "IP_ADDRESS", "DATE_TIME", "LOCATION"],
+                    on_fail=OnFailAction.NOOP
+                ),
+                ProfanityFree(
+                    on_fail=OnFailAction.NOOP
+                ),
+                RestrictToTopic(
+                    valid_topics=valid_topics,
+                    invalid_topics=invalid_topics,
+                    on_fail=OnFailAction.NOOP
+                ),
+                BanList(
+                    banned_words=self.banned_words,
+                    on_fail=OnFailAction.NOOP
+                )
             )
-        )
+
+        # Create input guards per subject and a general fallback
+        self.input_guards = {
+            "physics": _create_input_guard(physics_topics + ["science"]),
+            "chemistry": _create_input_guard(chemistry_topics + ["science"]),
+            "biology": _create_input_guard(biology_topics + ["science"]),
+            "general": _create_input_guard(physics_topics + chemistry_topics + biology_topics + ["science"])
+        }
         
         # Create output guard for model responses (without topic restriction)
         self.output_guard = Guard().use_many(
@@ -127,6 +138,13 @@ class EducationalGuardrails:
             ),
         )
         
+        # Subject-specific topic whitelists
+        self.topic_whitelists = {
+            "physics": set(topic.lower() for topic in physics_topics),
+            "chemistry": set(topic.lower() for topic in chemistry_topics),
+            "biology": set(topic.lower() for topic in biology_topics),
+        }
+        
         # Educational-specific patterns for answer-seeking detection
         self.answer_seeking_patterns = [
             r"give me the answer",
@@ -138,7 +156,7 @@ class EducationalGuardrails:
             r"what's the solution"
         ]
     
-    def check_safety_with_guardrails(self, prompt: str, is_input: bool = True) -> Dict:
+    def check_safety_with_guardrails(self, prompt: str, is_input: bool = True, subject: Optional[str] = None) -> Dict:
         """
         Use Guardrails AI validators to check prompt safety.
         
@@ -149,7 +167,11 @@ class EducationalGuardrails:
         Returns:
             Dictionary with 'allowed', 'message', 'violations'
         """
-        guard = self.input_guard if is_input else self.output_guard
+        if is_input:
+            subject_key = (subject or "").strip().lower() if subject else None
+            guard = self.input_guards.get(subject_key) if subject_key in self.input_guards else self.input_guards["general"]
+        else:
+            guard = self.output_guard
         
         try:
             outcome = guard.validate(prompt)
@@ -440,7 +462,7 @@ class EducationalGuardrails:
         
         return False, ""
     
-    def apply_guardrails(self, prompt: str) -> Dict:
+    def apply_guardrails(self, prompt: str, subject: Optional[str] = None) -> Dict:
         """
         Apply all guardrails to student prompt.
         Multi-layered safety checks using Guardrails AI.
@@ -452,7 +474,8 @@ class EducationalGuardrails:
             Dictionary with 'allowed', 'message', 'category', 'modified_prompt', 'violations'
         """
         # Layer 1: Safety checks using Guardrails AI validators
-        safety_result = self.check_safety_with_guardrails(prompt, is_input=True)
+        normalized_subject = subject.strip().lower() if subject else None
+        safety_result = self.check_safety_with_guardrails(prompt, is_input=True, subject=normalized_subject)
         
         if not safety_result["allowed"]:
             # Get primary category from most severe violation, or default to "safety"
@@ -487,6 +510,30 @@ class EducationalGuardrails:
         
         logger.info(f"Prompt approved: {prompt[:50]}...")
         
+        # Layer 3: Subject-specific topic guidance (if subject provided)
+        if normalized_subject:
+            whitelist = self.topic_whitelists.get(normalized_subject)
+            if whitelist:
+                tokens = set(re.findall(r"[a-zA-Z']+", prompt.lower()))
+                if tokens and not tokens.intersection(whitelist):
+                    subject_title = normalized_subject.capitalize()
+                    message = (
+                        f"Let's keep our discussion focused on {subject_title}. "
+                        f"Try asking a question related to the {subject_title} curriculum."
+                    )
+                    return {
+                        "allowed": False,
+                        "message": message,
+                        "category": "off_topic",
+                        "modified_prompt": None,
+                        "violations": [{
+                            "category": "off_topic",
+                            "severity": "medium",
+                            "reason": f"Question does not appear related to {subject_title}.",
+                            "details": "Please align the question with the selected subject."
+                        }]
+                    }
+
         return {
             "allowed": True,
             "message": "Prompt approved",

@@ -360,7 +360,7 @@ if prompt := st.chat_input("Ask your O-Level question..."):
         # Apply guardrails only if enabled
         if enable_safety_mode:
             with st.spinner("Validating your question..."):
-                guardrail_result = guardrails.apply_guardrails(prompt)
+                guardrail_result = guardrails.apply_guardrails(prompt, subject=subject)
         else:
             # Bypass guardrails when disabled
             guardrail_result = {
@@ -398,10 +398,13 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                 "content": violation_message
             })
         else:
-            # Show warning if answer-seeking detected (only when guardrails are enabled)
-            if enable_safety_mode and guardrail_result["message"] not in ["Prompt approved", "Safety guardrails disabled"]:
-                st.warning(guardrail_result["message"])
-            
+            warning_prefix = ""
+            # Capture warning if answer-seeking detected (only when guardrails are enabled)
+            if enable_safety_mode:
+                message_text = guardrail_result.get("message", "")
+                if message_text not in ["Prompt approved", "Safety guardrails disabled"]:
+                    warning_prefix = f"⚠️ {message_text}\n\n"
+
             # Helper function to get the appropriate model for the subject
             def get_subject_model():
                 if subject in subject_models and subject_models[subject] is not None:
@@ -420,7 +423,9 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                     
                     with st.spinner(f"Using {model_type} model for {subject}..."):
                         result = model_to_use.generate(prompt, subject=subject, max_new_tokens=200, temperature=0.3)
-                        st.markdown(result["response"])
+                        display_response = f"{warning_prefix}{result['response']}" if warning_prefix else result["response"]
+                        st.markdown(display_response)
+                        warning_prefix = ""
                         
                         if show_metrics:
                             # Define chemistry-specific keywords for API metrics
@@ -461,13 +466,13 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                             metrics = evaluator.evaluate_response(result["response"])
                             st.session_state.messages.append({
                                 "role": "assistant",
-                                "content": result["response"],
+                                "content": display_response,
                                 "metrics": metrics
                             })
                         else:
                             st.session_state.messages.append({
                                 "role": "assistant",
-                                "content": result["response"]
+                                "content": display_response
                             })
                 else:
                     st.error(f"No model available for {subject}")
@@ -475,25 +480,30 @@ if prompt := st.chat_input("Ask your O-Level question..."):
             elif model_choice == "General Baseline" and baseline_ok:
                 with st.spinner("Using general baseline model..."):
                     result = baseline_model.generate(prompt, subject=subject, max_new_tokens=256, temperature=0.7)
-                    st.markdown(result["response"])
+                    display_response = f"{warning_prefix}{result['response']}" if warning_prefix else result["response"]
+                    st.markdown(display_response)
+                    warning_prefix = ""
                     
                     if show_metrics:
                         metrics = evaluator.evaluate_response(result["response"])
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": result["response"],
+                            "content": display_response,
                             "metrics": metrics
                         })
                     else:
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": result["response"]
+                            "content": display_response
                         })
                         
             elif model_choice == "Frontier (GPT-4o)" and frontier_ok:
                 response_placeholder = st.empty()
-                full_response = ""
-                
+                full_response = warning_prefix if warning_prefix else ""
+                if warning_prefix:
+                    response_placeholder.markdown(full_response)
+                    warning_prefix = ""
+
                 for token in frontier_model.stream_generate(prompt, subject=subject):
                     full_response += token
                     response_placeholder.markdown(full_response)
@@ -528,6 +538,9 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                 subject_model_to_use = get_subject_model()
                 
                 if subject_model_to_use and frontier_ok:
+                    if warning_prefix:
+                        st.markdown(warning_prefix)
+                        warning_prefix = ""
                     col1, col2 = st.columns(2)
                     
                     with col1:
@@ -555,6 +568,9 @@ if prompt := st.chat_input("Ask your O-Level question..."):
                                     st.json(metrics)
                 elif subject_model_to_use and baseline_ok:
                     # Compare subject-specific vs general baseline
+                    if warning_prefix:
+                        st.markdown(warning_prefix)
+                        warning_prefix = ""
                     col1, col2 = st.columns(2)
                     
                     with col1:
