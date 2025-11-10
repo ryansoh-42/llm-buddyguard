@@ -249,6 +249,10 @@ Can you think of two numbers that fit these conditions?"
                 generated_tokens, 
                 skip_special_tokens=True
             )
+
+            neg_log_likelihood = outputs.loss
+            avg_neg_log_likelihood = neg_log_likelihood / output_length
+            ppl = torch.exp(avg_neg_log_likelihood)
             
             return {
                 "response": response_text.strip(),
@@ -256,7 +260,8 @@ Can you think of two numbers that fit these conditions?"
                     "model_name": self.model_name,
                     "prompt_tokens": input_length,
                     "generated_tokens": output_length - input_length,
-                    "total_tokens": output_length
+                    "total_tokens": output_length,
+                    "perplexity": ppl
                 }
             }
             
