@@ -1,4 +1,4 @@
-# src/models/baseline.py
+# src/models/finetune.py
 from typing import Dict, List, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 try:

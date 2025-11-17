@@ -15,10 +15,10 @@ This project builds an educational AI tutor that:
 
 ## Recent Updates (Latest Commit)
 
-### ✅ Implemented Subject-Specific Local Model Loading
+### Implemented Subject-Specific Local Model Loading
 - **Fine-tuned Models**: Added support for HuggingFace fine-tuned models:
   - `Fawl/is469_project_physics` (Physics model)
-  - `Fawl/is469_project_chem` (Chemistry model) 
+  - `Fawl/is469_project_chem` (Chemistry model)
   - `Fawl/is469_project_bio` (Biology model)
 - **Subject-Specific Prompts**: Created optimized system prompts for each subject
 - **Memory Optimization**: Configurable model loading to prevent memory overflow
@@ -75,7 +75,7 @@ These validators provide:
 
 ### 3. Install Models Locally
 
-The project now uses fine-tuned models that need to be downloaded locally:
+The project uses fine-tuned models that need to be downloaded locally:
 
 #### Step 3.1: Hugging Face Authentication
 ```bash
@@ -180,19 +180,82 @@ subject_models["Chemistry"] = None
 print("ℹ️ Chemistry model disabled for testing")
 ```
 
-## TODO
 
-### Immediate Testing Needed
-- [ ] **Cross-subject Question Testing**: Test what happens when you select "Chemistry" but ask Physics questions (e.g., "What is Newton's second law?" while Chemistry is selected)
-- [ ] **Subject Specificity**: Verify that models provide appropriate responses when asked off-topic questions
-- [ ] **Model Consistency**: Test if Chemistry model gives chemistry-focused answers to general science questions
+## Demo Scripts
 
-### Future Improvements
-- [ ] Add automatic subject detection from question content
-- [ ] Implement model routing based on question analysis
-- [ ] Add subject switching recommendations
-- [ ] Improve cross-subject knowledge integration
-- [ ] Add confidence scoring for subject-specific responses
+Understand how the metrics system works by running these executable examples:
+
+### Compare Educational vs API Metrics
+See the difference between pedagogical quality scores and technical accuracy metrics:
+
+```bash
+python compare_metrics_demo.py
+```
+
+**Shows:**
+- Educational metrics (step-by-step, tone, no direct answers)
+- API metrics (ROUGE, keyword recall, order correctness)
+- When to use each metric system
+
+**Example Output:**
+```
+📚 CURRENT EDUCATIONAL METRICS (ModelEvaluator)
+  no_direct_answer: 1.0
+  step_by_step_score: 0.67
+  tone_score: 0.75
+  
+🔬 API METRICS (ResponseMetrics - Test API)
+  rouge_L_f1: 0.85
+  keyword_recall: 0.83
+  order_score: 0.95
+```
+
+### Chemistry Metrics Examples
+Explore how metrics evaluate chemistry-specific responses:
+
+```bash
+python demo_chemistry_metrics.py
+```
+
+**Demonstrates:**
+- Chemical equation balancing evaluation
+- Molecule structure explanation scoring
+- MCQ answer extraction and accuracy
+- Key chemistry terminology detection
+
+**Test Cases Included:**
+1. **Balancing Equations** - Tests ROUGE, keyword recall, and reasoning order
+2. **Molecule Structure** - Evaluates chemistry terminology and step-by-step approach
+3. **MCQ Questions** - Demonstrates answer extraction and exact match scoring
+
+**Example Output:**
+```
+🧪 CHEMISTRY METRICS DEMO
+
+📝 TEST 1: Balancing Chemical Equations
+  ROUGE-L F1: 0.62
+  Keyword Recall: 0.83
+  Order Score: 0.75
+  ⚠️  Order Issue: "First action should be 'count'"
+
+🔬 TEST 2: Molecule Structure
+  ROUGE-L F1: 0.89
+  Keyword Recall: 1.0
+  Order Score: 0.95
+  ✅ Order Status: Correct reasoning sequence
+
+❓ TEST 3: Multiple Choice Question
+  Exact Match: True
+  Extracted Answer: 'B'
+  Accuracy: 1.0
+```
+
+## Future Improvements
+- Add automatic subject detection from question content
+- Implement model routing based on question analysis
+- Add subject switching recommendations
+- Improve cross-subject knowledge integration
+- Add confidence scoring for subject-specific responses
 
 ## Troubleshooting
 
@@ -228,17 +291,39 @@ print("ℹ️ Chemistry model disabled for testing")
 
 ```
 llm-buddyguard/
-├── app.py                 # Main Streamlit application
+├── app.py                          # Main Streamlit application with dual metrics UI
+├── api.py                          # FastAPI server for metrics evaluation
+├── automated_eval.py               # Automated evaluation with HF batching & MCQ metrics
+├── compare_metrics_demo.py         # Demo comparing educational vs API metrics
+├── demo_chemistry_metrics.py       # Chemistry-specific metrics demonstration
+├── data/
+│   ├── additional_filter.py        # Content filtering for sensitive/irrelevant topics
+│   ├── document_process.py         # CSV/document parsing and preprocessing
+│   ├── keyword_extraction.py       # Extract key terms from educational content
+│   └── sort_documents.py           # Categorise PDF files
+│
 ├── src/
+│   ├── __init__.py
 │   ├── models/
-│   │   ├── baseline.py    # Local model loading with subject-specific prompts
-│   │   ├── frontier.py    # OpenAI GPT-4o integration
-│   │   └── peft.py       # PEFT model support
-│   ├── guardrails.py     # Educational content filtering
-│   ├── evaluation.py     # Response evaluation metrics
-│   └── utils.py         # Utility functions
+│   │   ├── __init__.py
+│   │   ├── finetune.py             # Fine-tuned HuggingFace model wrapper
+│   │   └── frontier.py             # OpenAI GPT-4o integration with streaming
+│   │
+│   ├── guardrails.py               # Educational content filtering & safety checks
+│   ├── evaluation.py               # Educational metrics & response evaluation
+│   ├── metrics.py                  # API metrics (ROUGE, Text F1, Order, Keywords)
+│   └── utils.py                    # Utility functions & helpers
+│
 ├── scripts/
-│   └── preload_models.py # Model download script
-├── finetune/             # Fine-tuning data and scripts
-└── test/                # Test files
+│   └── preload_models.py           # Preload or verify fine-tuned subject models locally
+│
+├── finetune/
+│   ├── run.py                      # Fine-tuning script (Llama-3.2-1B-Instruct)
+│   ├── data_handling.py            # CSV processing for training data
+│   └── data/                       # Training datasets (bio, chemistry, physics)
+│
+├── .gitignore                      # Git ignore rules
+├── requirements.txt                # Python dependencies
+├── README.md                       # This file
+└── API_README.md                   # FastAPI metrics server documentation
 ```

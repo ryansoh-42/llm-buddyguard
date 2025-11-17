@@ -34,21 +34,23 @@ def load_models():
     print("ℹ️ Physics model disabled for testing")
 
     # Load only Chemistry model for testing
-    try:
-        chemistry_model = FineTunedModel(model_name="Fawl/is469_project_chem")
-        subject_models["Chemistry"] = chemistry_model
-        print("✅ Chemistry model (local) ready")
-    except Exception as e:
-        print(f"❌ Chemistry model failed: {e}")
-        subject_models["Chemistry"] = None
-
     # try:
-    #     biology_model = FineTunedModel(model_name="Fawl/is469_project_bio")
-    #     subject_models["Biology"] = biology_model
-    #     print("✅ Biology model (local) ready")
+    #     chemistry_model = FineTunedModel(model_name="Fawl/is469_project_chem")
+    #     subject_models["Chemistry"] = chemistry_model
+    #     print("✅ Chemistry model (local) ready")
     # except Exception as e:
-    #     print(f"❌ Biology model failed: {e}")
-    #     subject_models["Biology"] = None
+    #     print(f"❌ Chemistry model failed: {e}")
+    #     subject_models["Chemistry"] = None
+    subject_models["Chemistry"] = None
+    print("ℹ️ Chemistry model disabled for testing")
+
+    try:
+        biology_model = FineTunedModel(model_name="Fawl/is469_project_bio")
+        subject_models["Biology"] = biology_model
+        print("✅ Biology model (local) ready")
+    except Exception as e:
+        print(f"❌ Biology model failed: {e}")
+        subject_models["Biology"] = None
     subject_models["Biology"] = None
     print("ℹ️ Biology model disabled for testing")
 
